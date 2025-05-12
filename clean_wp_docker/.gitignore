@@ -1,0 +1,52 @@
+# WordPress Development Environment
+/wordpress/
+/.wordpress-cache/
+
+# Database
+/db_data/
+
+# Docker
+/.docker/
+docker-compose.yml.backup
+
+# Logs
+/logs/
+*.log
+
+# Dependency directories
+/node_modules/
+/vendor/
+
+# Build directories
+/build/
+/dist/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor directories and files
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+
+# Zip files
+*.zip
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
