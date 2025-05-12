@@ -52,19 +52,24 @@ class Status_Sentry {
         // Hook management
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/hooks/class-status-sentry-hook-config.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/hooks/class-status-sentry-hook-manager.php';
-        
+
         // Data pipeline
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/data/class-status-sentry-data-capture.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/data/class-status-sentry-data-filter.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/data/class-status-sentry-sampling-manager.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/data/class-status-sentry-event-queue.php';
-        
+
         // Event processing
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/data/class-status-sentry-event-processor.php';
-        
+
+        // Monitoring
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-baseline.php';
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-self-monitor.php';
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-resource-manager.php';
+
         // Scheduler
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/class-status-sentry-scheduler.php';
-        
+
         // Admin
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/admin/class-status-sentry-admin.php';
     }
@@ -105,7 +110,10 @@ class Status_Sentry {
         // Initialize admin
         $admin = new Status_Sentry_Admin();
         $admin->init();
-        
+
+        // Initialize scheduler
+        Status_Sentry_Scheduler::init();
+
         // Register hooks
         $this->hook_manager->register_hooks();
     }
