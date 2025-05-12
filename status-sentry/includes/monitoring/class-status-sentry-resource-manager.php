@@ -22,12 +22,13 @@
  * - Trigger garbage collection when needed
  * - Monitor CPU usage and system load
  * - Provide adaptive resource allocation
+ * - Implement the Monitoring_Interface for centralized monitoring
  *
  * @since      1.1.0
  * @package    Status_Sentry
  * @subpackage Status_Sentry/includes/monitoring
  */
-class Status_Sentry_Resource_Manager {
+class Status_Sentry_Resource_Manager implements Status_Sentry_Monitoring_Interface, Status_Sentry_Monitoring_Handler_Interface {
 
     /**
      * The baseline instance.
@@ -406,5 +407,207 @@ class Status_Sentry_Resource_Manager {
 
         // Allow the number of cores to be filtered
         return apply_filters('status_sentry_cpu_cores', $cores);
+    }
+
+    /**
+     * Initialize the monitoring component.
+     *
+     * @since    1.3.0
+     * @return   void
+     */
+    public function init() {
+        // Nothing to initialize here, as the constructor already sets up everything
+    }
+
+    /**
+     * Register event handlers with the monitoring manager.
+     *
+     * @since    1.3.0
+     * @param    Status_Sentry_Monitoring_Manager    $manager    The monitoring manager instance.
+     * @return   void
+     */
+    public function register_handlers($manager) {
+        $manager->register_handler($this);
+    }
+
+    /**
+     * Process a monitoring event.
+     *
+     * @since    1.3.0
+     * @param    Status_Sentry_Monitoring_Event    $event    The monitoring event to process.
+     * @return   void
+     */
+    public function process_event($event) {
+        // This method is called by the monitoring manager when an event is dispatched
+        // We'll handle events in the handle() method instead
+    }
+
+    /**
+     * Get the monitoring component's status.
+     *
+     * @since    1.3.0
+     * @return   array    The component status as an associative array.
+     */
+    public function get_status() {
+        return [
+            'memory_usage' => memory_get_usage(),
+            'memory_peak' => memory_get_peak_usage(),
+            'memory_limit' => $this->get_memory_limit_in_bytes(),
+            'memory_usage_percent' => (memory_get_usage() / $this->get_memory_limit_in_bytes()) * 100,
+            'cpu_load' => $this->get_cpu_load(),
+            'cpu_threshold' => $this->cpu_threshold,
+            'high_traffic' => $this->is_high_traffic(),
+            'system_overloaded' => $this->is_system_overloaded(),
+        ];
+    }
+
+    /**
+     * Get the monitoring component's configuration.
+     *
+     * @since    1.3.0
+     * @return   array    The component configuration as an associative array.
+     */
+    public function get_config() {
+        return [
+            'budgets' => $this->budgets,
+            'gc_settings' => $this->gc_settings,
+            'cpu_threshold' => $this->cpu_threshold,
+        ];
+    }
+
+    /**
+     * Update the monitoring component's configuration.
+     *
+     * @since    1.3.0
+     * @param    array    $config    The new configuration as an associative array.
+     * @return   bool                Whether the configuration was successfully updated.
+     */
+    public function update_config($config) {
+        $updated = false;
+
+        // Update budgets if provided
+        if (isset($config['budgets']) && is_array($config['budgets'])) {
+            $this->budgets = array_merge($this->budgets, $config['budgets']);
+            $updated = true;
+        }
+
+        // Update GC settings if provided
+        if (isset($config['gc_settings']) && is_array($config['gc_settings'])) {
+            $this->gc_settings = array_merge($this->gc_settings, $config['gc_settings']);
+            $updated = true;
+        }
+
+        // Update CPU threshold if provided
+        if (isset($config['cpu_threshold'])) {
+            $threshold = floatval($config['cpu_threshold']);
+            if ($threshold >= 0.1 && $threshold <= 1.0) {
+                $this->cpu_threshold = $threshold;
+                $updated = true;
+            }
+        }
+
+        return $updated;
+    }
+
+    /**
+     * Get the handler's priority.
+     *
+     * @since    1.3.0
+     * @return   int    The handler's priority (0-100).
+     */
+    public function get_priority() {
+        return 60; // Medium-high priority
+    }
+
+    /**
+     * Get the event types this handler can process.
+     *
+     * @since    1.3.0
+     * @return   array    An array of event types.
+     */
+    public function get_handled_types() {
+        return [
+            Status_Sentry_Monitoring_Event::TYPE_PERFORMANCE,
+            Status_Sentry_Monitoring_Event::TYPE_HEALTH,
+        ];
+    }
+
+    /**
+     * Check if this handler can handle the given event.
+     *
+     * @since    1.3.0
+     * @param    Status_Sentry_Monitoring_Event    $event    The event to check.
+     * @return   bool                                        Whether this handler can handle the event.
+     */
+    public function can_handle($event) {
+        // We handle performance events related to resource usage
+        if ($event->get_type() === Status_Sentry_Monitoring_Event::TYPE_PERFORMANCE) {
+            $data = $event->get_data();
+            return isset($data['memory_usage']) || isset($data['execution_time']);
+        }
+
+        // We handle health check events
+        if ($event->get_type() === Status_Sentry_Monitoring_Event::TYPE_HEALTH &&
+            $event->get_context() === 'health_check') {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Handle a monitoring event.
+     *
+     * @since    1.3.0
+     * @param    Status_Sentry_Monitoring_Event    $event    The event to handle.
+     * @return   bool                                        Whether the event was successfully handled.
+     */
+    public function handle($event) {
+        $data = $event->get_data();
+
+        // Handle performance events
+        if ($event->get_type() === Status_Sentry_Monitoring_Event::TYPE_PERFORMANCE) {
+            // Check if memory usage is high
+            if (isset($data['memory_usage'])) {
+                $memory_limit = $this->get_memory_limit_in_bytes();
+                $memory_usage_percent = ($data['memory_usage'] / $memory_limit);
+
+                if ($memory_usage_percent > $this->gc_settings['memory_threshold']) {
+                    // Memory usage is high, trigger garbage collection
+                    $this->trigger_gc();
+                    return true;
+                }
+            }
+
+            return false; // No action needed
+        }
+
+        // Handle health check events
+        if ($event->get_type() === Status_Sentry_Monitoring_Event::TYPE_HEALTH &&
+            $event->get_context() === 'health_check') {
+
+            // Check system health
+            $status = $this->get_status();
+
+            // If system is overloaded, emit a warning event
+            if ($status['system_overloaded']) {
+                $manager = Status_Sentry_Monitoring_Manager::get_instance();
+
+                $manager->emit(
+                    Status_Sentry_Monitoring_Event::TYPE_WARNING,
+                    'resource_manager',
+                    'system_overload',
+                    'System is overloaded',
+                    $status,
+                    Status_Sentry_Monitoring_Event::PRIORITY_HIGH
+                );
+
+                return true;
+            }
+
+            return false; // No action needed
+        }
+
+        return false;
     }
 }

@@ -82,7 +82,12 @@ class Status_Sentry_Scheduler {
      * @since    1.1.0
      */
     public static function init() {
-        // Load dependencies
+        // Load interfaces first
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/interface-status-sentry-monitoring.php';
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/interface-status-sentry-monitoring-handler.php';
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-monitoring-event.php';
+
+        // Load monitoring components
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-self-monitor.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-resource-manager.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-task-state-manager.php';
@@ -189,6 +194,9 @@ class Status_Sentry_Scheduler {
         $start_time = microtime(true);
         $memory_start = memory_get_usage();
 
+        // Trigger the before task execution action for monitoring
+        do_action('status_sentry_before_task_execution', $task_name, $tier);
+
         try {
             // Execute the callback
             error_log(sprintf('Status Sentry: Starting task "%s" (%s tier)', $task_name, $tier));
@@ -207,13 +215,28 @@ class Status_Sentry_Scheduler {
                 // End monitoring with partial completion status
                 self::$self_monitor->end_task($task_run_id, 'partial');
 
+                // Prepare execution data for monitoring
+                $execution_data = [
+                    'status' => 'partial',
+                    'execution_time' => microtime(true) - $start_time,
+                    'memory_used' => memory_get_usage() - $memory_start,
+                    'saved_state' => true,
+                    'continuation_scheduled' => false,
+                ];
+
                 // Schedule immediate continuation if requested
                 if (isset($result['_schedule_continuation']) && $result['_schedule_continuation'] === true) {
                     $continuation_delay = isset($result['_continuation_delay']) ? $result['_continuation_delay'] : 60; // Default 1 minute
                     wp_schedule_single_event(time() + $continuation_delay, $task['hook']);
 
                     error_log(sprintf('Status Sentry: Scheduled continuation of task "%s" in %d seconds', $task_name, $continuation_delay));
+
+                    $execution_data['continuation_scheduled'] = true;
+                    $execution_data['continuation_delay'] = $continuation_delay;
                 }
+
+                // Trigger the after task execution action for monitoring
+                do_action('status_sentry_after_task_execution', $task_name, $tier, $execution_data);
 
                 // Return the actual result if provided
                 return isset($result['_result']) ? $result['_result'] : true;
@@ -227,17 +250,33 @@ class Status_Sentry_Scheduler {
                 self::$self_monitor->end_task($task_run_id, 'completed');
 
                 // Check if we should trigger garbage collection
+                $gc_triggered = false;
                 if (self::$resource_manager->should_trigger_gc_after_task($task_name)) {
                     self::$resource_manager->trigger_gc();
+                    $gc_triggered = true;
                 }
 
                 // Log completion
                 $execution_time = microtime(true) - $start_time;
+                $memory_used = memory_get_usage() - $memory_start;
+
                 error_log(sprintf(
-                    'Status Sentry: Task "%s" completed successfully in %.2f seconds',
+                    'Status Sentry: Task "%s" completed successfully in %.2f seconds (memory: %.2f MB)',
                     $task_name,
-                    $execution_time
+                    $execution_time,
+                    $memory_used / (1024 * 1024)
                 ));
+
+                // Prepare execution data for monitoring
+                $execution_data = [
+                    'status' => 'completed',
+                    'execution_time' => $execution_time,
+                    'memory_used' => $memory_used,
+                    'gc_triggered' => $gc_triggered,
+                ];
+
+                // Trigger the after task execution action for monitoring
+                do_action('status_sentry_after_task_execution', $task_name, $tier, $execution_data);
 
                 return $result;
             }
@@ -258,9 +297,24 @@ class Status_Sentry_Scheduler {
             }
 
             // Check if we should trigger garbage collection
+            $gc_triggered = false;
             if (self::$resource_manager->should_trigger_gc_after_task($task_name)) {
                 self::$resource_manager->trigger_gc();
+                $gc_triggered = true;
             }
+
+            // Prepare execution data for monitoring
+            $execution_data = [
+                'status' => 'failed',
+                'execution_time' => microtime(true) - $start_time,
+                'memory_used' => memory_get_usage() - $memory_start,
+                'error_type' => 'exception',
+                'error_message' => $e->getMessage(),
+                'gc_triggered' => $gc_triggered,
+            ];
+
+            // Trigger the after task execution action for monitoring
+            do_action('status_sentry_after_task_execution', $task_name, $tier, $execution_data);
 
             return false;
         } catch (Error $e) {
@@ -280,9 +334,24 @@ class Status_Sentry_Scheduler {
             }
 
             // Check if we should trigger garbage collection
+            $gc_triggered = false;
             if (self::$resource_manager->should_trigger_gc_after_task($task_name)) {
                 self::$resource_manager->trigger_gc();
+                $gc_triggered = true;
             }
+
+            // Prepare execution data for monitoring
+            $execution_data = [
+                'status' => 'failed',
+                'execution_time' => microtime(true) - $start_time,
+                'memory_used' => memory_get_usage() - $memory_start,
+                'error_type' => 'error',
+                'error_message' => $e->getMessage(),
+                'gc_triggered' => $gc_triggered,
+            ];
+
+            // Trigger the after task execution action for monitoring
+            do_action('status_sentry_after_task_execution', $task_name, $tier, $execution_data);
 
             return false;
         }

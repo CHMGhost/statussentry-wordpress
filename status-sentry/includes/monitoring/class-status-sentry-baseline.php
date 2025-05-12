@@ -18,12 +18,13 @@
  * - Update baselines over time with new measurements
  * - Provide access to baseline data for other components
  * - Detect significant deviations from established baselines
+ * - Implement the Monitoring_Interface for centralized monitoring
  *
  * @since      1.1.0
  * @package    Status_Sentry
  * @subpackage Status_Sentry/includes/monitoring
  */
-class Status_Sentry_Baseline {
+class Status_Sentry_Baseline implements Status_Sentry_Monitoring_Interface {
 
     /**
      * The table name.
@@ -170,15 +171,15 @@ class Status_Sentry_Baseline {
         }
 
         $baseline_value = $baseline['value'];
-        
+
         // Calculate the relative difference
         if ($baseline_value == 0) {
             // Avoid division by zero
             return $value > 0;
         }
-        
+
         $relative_diff = abs(($value - $baseline_value) / $baseline_value);
-        
+
         return $relative_diff > $threshold;
     }
 
@@ -199,6 +200,85 @@ class Status_Sentry_Baseline {
             return $migration->up();
         }
 
+        return true;
+    }
+
+    /**
+     * Initialize the monitoring component.
+     *
+     * @since    1.3.0
+     * @return   void
+     */
+    public function init() {
+        // Nothing to initialize here, as the constructor already sets up everything
+    }
+
+    /**
+     * Register event handlers with the monitoring manager.
+     *
+     * @since    1.3.0
+     * @param    Status_Sentry_Monitoring_Manager    $manager    The monitoring manager instance.
+     * @return   void
+     */
+    public function register_handlers($manager) {
+        // Baseline doesn't handle events directly
+    }
+
+    /**
+     * Process a monitoring event.
+     *
+     * @since    1.3.0
+     * @param    Status_Sentry_Monitoring_Event    $event    The monitoring event to process.
+     * @return   void
+     */
+    public function process_event($event) {
+        // Baseline doesn't process events directly
+    }
+
+    /**
+     * Get the monitoring component's status.
+     *
+     * @since    1.3.0
+     * @return   array    The component status as an associative array.
+     */
+    public function get_status() {
+        global $wpdb;
+
+        // Get baseline metrics count
+        $count = 0;
+        if ($this->ensure_table_exists()) {
+            $count = $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name}");
+        }
+
+        return [
+            'metrics_count' => $count,
+            'table_exists' => $this->ensure_table_exists(),
+        ];
+    }
+
+    /**
+     * Get the monitoring component's configuration.
+     *
+     * @since    1.3.0
+     * @return   array    The component configuration as an associative array.
+     */
+    public function get_config() {
+        return [
+            'ema_weight' => 0.1, // Exponential moving average weight
+            'significance_threshold' => 0.5, // Default significance threshold
+            'min_samples' => 5, // Minimum samples needed for significance testing
+        ];
+    }
+
+    /**
+     * Update the monitoring component's configuration.
+     *
+     * @since    1.3.0
+     * @param    array    $config    The new configuration as an associative array.
+     * @return   bool                Whether the configuration was successfully updated.
+     */
+    public function update_config($config) {
+        // Baseline doesn't have configurable options yet
         return true;
     }
 }

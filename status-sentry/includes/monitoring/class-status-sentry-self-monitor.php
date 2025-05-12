@@ -19,12 +19,13 @@
  * - Monitor memory usage and execution time
  * - Detect and log errors and exceptions
  * - Provide diagnostic information for troubleshooting
+ * - Implement the Monitoring_Interface for centralized monitoring
  *
  * @since      1.1.0
  * @package    Status_Sentry
  * @subpackage Status_Sentry/includes/monitoring
  */
-class Status_Sentry_Self_Monitor {
+class Status_Sentry_Self_Monitor implements Status_Sentry_Monitoring_Interface, Status_Sentry_Monitoring_Handler_Interface {
 
     /**
      * The task runs table name.
@@ -52,7 +53,7 @@ class Status_Sentry_Self_Monitor {
     public function __construct() {
         global $wpdb;
         $this->table_name = $wpdb->prefix . 'status_sentry_task_runs';
-        
+
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-baseline.php';
         $this->baseline = new Status_Sentry_Baseline();
     }
@@ -226,5 +227,193 @@ class Status_Sentry_Self_Monitor {
         }
 
         return true;
+    }
+
+    /**
+     * Initialize the monitoring component.
+     *
+     * @since    1.3.0
+     * @return   void
+     */
+    public function init() {
+        // Nothing to initialize here, as the constructor already sets up everything
+    }
+
+    /**
+     * Register event handlers with the monitoring manager.
+     *
+     * @since    1.3.0
+     * @param    Status_Sentry_Monitoring_Manager    $manager    The monitoring manager instance.
+     * @return   void
+     */
+    public function register_handlers($manager) {
+        $manager->register_handler($this);
+    }
+
+    /**
+     * Process a monitoring event.
+     *
+     * @since    1.3.0
+     * @param    Status_Sentry_Monitoring_Event    $event    The monitoring event to process.
+     * @return   void
+     */
+    public function process_event($event) {
+        // This method is called by the monitoring manager when an event is dispatched
+        // We'll handle events in the handle() method instead
+    }
+
+    /**
+     * Get the monitoring component's status.
+     *
+     * @since    1.3.0
+     * @return   array    The component status as an associative array.
+     */
+    public function get_status() {
+        global $wpdb;
+
+        // Get counts of task runs by status
+        $counts = [
+            'total' => 0,
+            'running' => 0,
+            'completed' => 0,
+            'failed' => 0,
+            'partial' => 0,
+        ];
+
+        if ($this->ensure_table_exists()) {
+            $counts['total'] = $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name}");
+            $counts['running'] = $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name} WHERE status = 'running'");
+            $counts['completed'] = $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name} WHERE status = 'completed'");
+            $counts['failed'] = $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name} WHERE status = 'failed'");
+            $counts['partial'] = $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name} WHERE status = 'partial'");
+        }
+
+        // Get recent failures
+        $recent_failures = $this->get_recent_task_runs(null, 'failed', 5);
+
+        return [
+            'task_run_counts' => $counts,
+            'recent_failures' => $recent_failures,
+            'memory_usage' => memory_get_usage(),
+            'memory_peak' => memory_get_peak_usage(),
+        ];
+    }
+
+    /**
+     * Get the monitoring component's configuration.
+     *
+     * @since    1.3.0
+     * @return   array    The component configuration as an associative array.
+     */
+    public function get_config() {
+        return [
+            'enabled' => true, // Self-monitoring is always enabled
+            'retention_days' => 7, // Keep task runs for 7 days
+        ];
+    }
+
+    /**
+     * Update the monitoring component's configuration.
+     *
+     * @since    1.3.0
+     * @param    array    $config    The new configuration as an associative array.
+     * @return   bool                Whether the configuration was successfully updated.
+     */
+    public function update_config($config) {
+        // Self-monitoring doesn't have any configurable options yet
+        return true;
+    }
+
+    /**
+     * Get the handler's priority.
+     *
+     * @since    1.3.0
+     * @return   int    The handler's priority (0-100).
+     */
+    public function get_priority() {
+        return 50; // Medium priority
+    }
+
+    /**
+     * Get the event types this handler can process.
+     *
+     * @since    1.3.0
+     * @return   array    An array of event types.
+     */
+    public function get_handled_types() {
+        return [
+            Status_Sentry_Monitoring_Event::TYPE_PERFORMANCE,
+            Status_Sentry_Monitoring_Event::TYPE_ERROR,
+            Status_Sentry_Monitoring_Event::TYPE_CRITICAL,
+        ];
+    }
+
+    /**
+     * Check if this handler can handle the given event.
+     *
+     * @since    1.3.0
+     * @param    Status_Sentry_Monitoring_Event    $event    The event to check.
+     * @return   bool                                        Whether this handler can handle the event.
+     */
+    public function can_handle($event) {
+        // We handle performance events related to tasks
+        if ($event->get_type() === Status_Sentry_Monitoring_Event::TYPE_PERFORMANCE &&
+            $event->get_source() === 'scheduler') {
+            return true;
+        }
+
+        // We handle error events related to tasks
+        if (($event->get_type() === Status_Sentry_Monitoring_Event::TYPE_ERROR ||
+             $event->get_type() === Status_Sentry_Monitoring_Event::TYPE_CRITICAL) &&
+            $event->get_source() === 'scheduler') {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Handle a monitoring event.
+     *
+     * @since    1.3.0
+     * @param    Status_Sentry_Monitoring_Event    $event    The event to handle.
+     * @return   bool                                        Whether the event was successfully handled.
+     */
+    public function handle($event) {
+        $data = $event->get_data();
+
+        // Handle task performance events
+        if ($event->get_type() === Status_Sentry_Monitoring_Event::TYPE_PERFORMANCE &&
+            $event->get_source() === 'scheduler' &&
+            isset($data['task_name'])) {
+
+            // Record performance metrics
+            if (isset($data['execution_time'])) {
+                $this->baseline->record_metric('task_duration', $data['task_name'], $data['execution_time']);
+            }
+
+            if (isset($data['memory_used'])) {
+                $this->baseline->record_metric('task_memory_usage', $data['task_name'], $data['memory_used']);
+            }
+
+            return true;
+        }
+
+        // Handle task error events
+        if (($event->get_type() === Status_Sentry_Monitoring_Event::TYPE_ERROR ||
+             $event->get_type() === Status_Sentry_Monitoring_Event::TYPE_CRITICAL) &&
+            $event->get_source() === 'scheduler' &&
+            isset($data['task_name'])) {
+
+            // Record error occurrence
+            $this->baseline->record_metric('task_errors', $data['task_name'], 1, [
+                'last_error' => $event->get_message(),
+                'last_error_time' => date('Y-m-d H:i:s'),
+            ]);
+
+            return true;
+        }
+
+        return false;
     }
 }

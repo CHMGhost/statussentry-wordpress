@@ -4,7 +4,7 @@ Tags: monitoring, performance, hooks, diagnostics, debugging
 Requires at least: 5.6
 Tested up to: 6.2
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -100,6 +100,19 @@ Yes, Status Sentry WP is designed to be extensible. You can register custom hook
 
 == Changelog ==
 
+= 1.3.0 =
+* Added centralized monitoring system with standardized interfaces
+* Implemented monitoring manager for event handling and dispatching
+* Added monitoring event class for standardized event representation
+* Added baseline monitoring component for performance tracking
+* Added self-monitor component for plugin health monitoring
+* Added resource manager component for resource usage tracking
+* Added task state manager component for task state persistence
+* Added conflict detector component for plugin conflict detection
+* Improved error handling and reporting throughout the plugin
+* Enhanced performance monitoring with baseline comparisons
+* Added support for circuit breakers and throttling in monitoring system
+
 = 1.1.0 =
 * Enhanced error handling throughout the data pipeline
 * Added resource-aware batch processing to prevent memory exhaustion
@@ -120,6 +133,9 @@ Yes, Status Sentry WP is designed to be extensible. You can register custom hook
 * Performance monitoring
 
 == Upgrade Notice ==
+
+= 1.3.0 =
+This update adds a comprehensive monitoring system with standardized interfaces, event handling, and multiple monitoring components for improved plugin health and performance tracking.
 
 = 1.1.0 =
 This update significantly improves error handling, performance, and reliability. It adds resource-aware processing, transaction support, and configurable retention policies.

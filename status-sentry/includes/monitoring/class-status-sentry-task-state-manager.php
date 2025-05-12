@@ -19,12 +19,13 @@
  * - Retrieve task state from the database
  * - Clean up expired task state
  * - Provide a simple API for task checkpointing
+ * - Implement the Monitoring_Interface for centralized monitoring
  *
  * @since      1.2.0
  * @package    Status_Sentry
  * @subpackage Status_Sentry/includes/monitoring
  */
-class Status_Sentry_Task_State_Manager {
+class Status_Sentry_Task_State_Manager implements Status_Sentry_Monitoring_Interface {
 
     /**
      * The table name.
@@ -237,10 +238,98 @@ class Status_Sentry_Task_State_Manager {
         global $wpdb;
 
         if ($wpdb->get_var("SHOW TABLES LIKE '{$this->table_name}'") != $this->table_name) {
-            error_log('Status Sentry: Task state table does not exist');
-            return false;
+            // Table doesn't exist, create it
+            require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/db/migrations/007_create_task_state_table.php';
+            $migration = new Status_Sentry_Migration_CreateTaskStateTable();
+            return $migration->up();
         }
 
+        return true;
+    }
+
+    /**
+     * Initialize the monitoring component.
+     *
+     * @since    1.3.0
+     * @return   void
+     */
+    public function init() {
+        // Nothing to initialize here, as the constructor already sets up everything
+    }
+
+    /**
+     * Register event handlers with the monitoring manager.
+     *
+     * @since    1.3.0
+     * @param    Status_Sentry_Monitoring_Manager    $manager    The monitoring manager instance.
+     * @return   void
+     */
+    public function register_handlers($manager) {
+        // Task State Manager doesn't handle events directly
+    }
+
+    /**
+     * Process a monitoring event.
+     *
+     * @since    1.3.0
+     * @param    Status_Sentry_Monitoring_Event    $event    The monitoring event to process.
+     * @return   void
+     */
+    public function process_event($event) {
+        // Task State Manager doesn't process events directly
+    }
+
+    /**
+     * Get the monitoring component's status.
+     *
+     * @since    1.3.0
+     * @return   array    The component status as an associative array.
+     */
+    public function get_status() {
+        global $wpdb;
+
+        // Get task state count
+        $count = 0;
+        $expired_count = 0;
+
+        if ($this->ensure_table_exists()) {
+            $count = $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name}");
+            $expired_count = $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$this->table_name} WHERE expires_at < %s",
+                    current_time('mysql')
+                )
+            );
+        }
+
+        return [
+            'state_count' => $count,
+            'expired_count' => $expired_count,
+            'table_exists' => $this->ensure_table_exists(),
+        ];
+    }
+
+    /**
+     * Get the monitoring component's configuration.
+     *
+     * @since    1.3.0
+     * @return   array    The component configuration as an associative array.
+     */
+    public function get_config() {
+        return [
+            'default_ttl' => 3600, // Default time to live (1 hour)
+        ];
+    }
+
+    /**
+     * Update the monitoring component's configuration.
+     *
+     * @since    1.3.0
+     * @param    array    $config    The new configuration as an associative array.
+     * @return   bool                Whether the configuration was successfully updated.
+     */
+    public function update_config($config) {
+        // Task State Manager doesn't have configurable options yet
         return true;
     }
 }
