@@ -26,10 +26,10 @@ class Status_Sentry_Admin {
     public function init() {
         // Add admin menu
         add_action('admin_menu', [$this, 'add_admin_menu']);
-        
+
         // Add admin scripts and styles
         add_action('admin_enqueue_scripts', [$this, 'enqueue_scripts']);
-        
+
         // Add dashboard widget
         add_action('wp_dashboard_setup', [$this, 'add_dashboard_widget']);
     }
@@ -50,7 +50,7 @@ class Status_Sentry_Admin {
             'dashicons-shield',
             100
         );
-        
+
         // Add dashboard submenu
         add_submenu_page(
             'status-sentry',
@@ -60,7 +60,7 @@ class Status_Sentry_Admin {
             'status-sentry',
             [$this, 'render_dashboard_page']
         );
-        
+
         // Add settings submenu
         add_submenu_page(
             'status-sentry',
@@ -70,7 +70,7 @@ class Status_Sentry_Admin {
             'status-sentry-settings',
             [$this, 'render_settings_page']
         );
-        
+
         // Add events submenu
         add_submenu_page(
             'status-sentry',
@@ -93,7 +93,7 @@ class Status_Sentry_Admin {
         if (strpos($hook_suffix, 'status-sentry') === false) {
             return;
         }
-        
+
         // Enqueue styles
         wp_enqueue_style(
             'status-sentry-admin',
@@ -101,7 +101,7 @@ class Status_Sentry_Admin {
             [],
             STATUS_SENTRY_VERSION
         );
-        
+
         // Enqueue scripts
         wp_enqueue_script(
             'status-sentry-admin',
@@ -110,7 +110,7 @@ class Status_Sentry_Admin {
             STATUS_SENTRY_VERSION,
             true
         );
-        
+
         // Localize script
         wp_localize_script(
             'status-sentry-admin',
@@ -143,19 +143,19 @@ class Status_Sentry_Admin {
     public function render_dashboard_page() {
         // Get event counts
         $event_counts = $this->get_event_counts();
-        
+
         // Get recent events
         $recent_events = $this->get_recent_events(5);
-        
+
         // Render the dashboard
         ?>
         <div class="wrap">
             <h1><?php echo esc_html__('Status Sentry Dashboard', 'status-sentry-wp'); ?></h1>
-            
+
             <div class="status-sentry-dashboard">
                 <div class="status-sentry-dashboard-section">
                     <h2><?php echo esc_html__('Event Summary', 'status-sentry-wp'); ?></h2>
-                    
+
                     <div class="status-sentry-dashboard-cards">
                         <?php foreach ($event_counts as $feature => $count) : ?>
                             <div class="status-sentry-dashboard-card">
@@ -165,10 +165,10 @@ class Status_Sentry_Admin {
                         <?php endforeach; ?>
                     </div>
                 </div>
-                
+
                 <div class="status-sentry-dashboard-section">
                     <h2><?php echo esc_html__('Recent Events', 'status-sentry-wp'); ?></h2>
-                    
+
                     <?php if (empty($recent_events)) : ?>
                         <p><?php echo esc_html__('No events found.', 'status-sentry-wp'); ?></p>
                     <?php else : ?>
@@ -190,7 +190,7 @@ class Status_Sentry_Admin {
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
-                        
+
                         <p>
                             <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-events')); ?>" class="button">
                                 <?php echo esc_html__('View All Events', 'status-sentry-wp'); ?>
@@ -211,64 +211,219 @@ class Status_Sentry_Admin {
     public function render_settings_page() {
         // Get current settings
         $settings = $this->get_settings();
-        
+
         // Handle form submission
         if (isset($_POST['status_sentry_settings_nonce']) && wp_verify_nonce($_POST['status_sentry_settings_nonce'], 'status_sentry_settings')) {
-            // Update settings
+            // Update feature settings
             $settings['core_monitoring'] = isset($_POST['core_monitoring']) ? 1 : 0;
             $settings['db_monitoring'] = isset($_POST['db_monitoring']) ? 1 : 0;
             $settings['conflict_detection'] = isset($_POST['conflict_detection']) ? 1 : 0;
             $settings['performance_monitoring'] = isset($_POST['performance_monitoring']) ? 1 : 0;
-            
+
+            // Update performance settings
+            $settings['db_batch_size'] = isset($_POST['db_batch_size']) ? max(10, min(500, intval($_POST['db_batch_size']))) : 100;
+            $settings['memory_threshold'] = isset($_POST['memory_threshold']) ? max(50, min(95, intval($_POST['memory_threshold']))) : 80;
+            $settings['gc_cycles'] = isset($_POST['gc_cycles']) ? max(1, min(10, intval($_POST['gc_cycles']))) : 3;
+            $settings['cpu_threshold'] = isset($_POST['cpu_threshold']) ? max(30, min(90, intval($_POST['cpu_threshold']))) : 70;
+            $settings['enable_query_cache'] = isset($_POST['enable_query_cache']) ? 1 : 0;
+            $settings['query_cache_ttl'] = isset($_POST['query_cache_ttl']) ? max(300, min(86400, intval($_POST['query_cache_ttl']))) : 3600;
+            $settings['enable_resumable_tasks'] = isset($_POST['enable_resumable_tasks']) ? 1 : 0;
+
+            // Update retention settings
+            $settings['events_retention_days'] = isset($_POST['events_retention_days']) ? max(1, min(365, intval($_POST['events_retention_days']))) : 30;
+            $settings['processed_queue_retention_days'] = isset($_POST['processed_queue_retention_days']) ? max(1, min(30, intval($_POST['processed_queue_retention_days']))) : 7;
+            $settings['failed_queue_retention_days'] = isset($_POST['failed_queue_retention_days']) ? max(1, min(90, intval($_POST['failed_queue_retention_days']))) : 14;
+            $settings['task_runs_retention_days'] = isset($_POST['task_runs_retention_days']) ? max(1, min(90, intval($_POST['task_runs_retention_days']))) : 30;
+
             // Save settings
             update_option('status_sentry_settings', $settings);
-            
+
             // Show success message
             echo '<div class="notice notice-success"><p>' . esc_html__('Settings saved.', 'status-sentry-wp') . '</p></div>';
         }
-        
+
         // Render the settings form
         ?>
         <div class="wrap">
             <h1><?php echo esc_html__('Status Sentry Settings', 'status-sentry-wp'); ?></h1>
-            
+
             <form method="post" action="">
                 <?php wp_nonce_field('status_sentry_settings', 'status_sentry_settings_nonce'); ?>
-                
-                <table class="form-table">
-                    <tr>
-                        <th scope="row"><?php echo esc_html__('Features', 'status-sentry-wp'); ?></th>
-                        <td>
-                            <fieldset>
-                                <legend class="screen-reader-text"><?php echo esc_html__('Features', 'status-sentry-wp'); ?></legend>
-                                
-                                <label for="core_monitoring">
-                                    <input type="checkbox" name="core_monitoring" id="core_monitoring" value="1" <?php checked($settings['core_monitoring'], 1); ?>>
-                                    <?php echo esc_html__('Core Monitoring', 'status-sentry-wp'); ?>
+
+                <h2 class="nav-tab-wrapper">
+                    <a href="#features" class="nav-tab nav-tab-active"><?php echo esc_html__('Features', 'status-sentry-wp'); ?></a>
+                    <a href="#performance" class="nav-tab"><?php echo esc_html__('Performance', 'status-sentry-wp'); ?></a>
+                    <a href="#retention" class="nav-tab"><?php echo esc_html__('Data Retention', 'status-sentry-wp'); ?></a>
+                </h2>
+
+                <div id="features" class="tab-content">
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row"><?php echo esc_html__('Monitoring Features', 'status-sentry-wp'); ?></th>
+                            <td>
+                                <fieldset>
+                                    <legend class="screen-reader-text"><?php echo esc_html__('Features', 'status-sentry-wp'); ?></legend>
+
+                                    <label for="core_monitoring">
+                                        <input type="checkbox" name="core_monitoring" id="core_monitoring" value="1" <?php checked($settings['core_monitoring'], 1); ?>>
+                                        <?php echo esc_html__('Core Monitoring', 'status-sentry-wp'); ?>
+                                    </label>
+                                    <br>
+
+                                    <label for="db_monitoring">
+                                        <input type="checkbox" name="db_monitoring" id="db_monitoring" value="1" <?php checked($settings['db_monitoring'], 1); ?>>
+                                        <?php echo esc_html__('Database Monitoring', 'status-sentry-wp'); ?>
+                                    </label>
+                                    <br>
+
+                                    <label for="conflict_detection">
+                                        <input type="checkbox" name="conflict_detection" id="conflict_detection" value="1" <?php checked($settings['conflict_detection'], 1); ?>>
+                                        <?php echo esc_html__('Conflict Detection', 'status-sentry-wp'); ?>
+                                    </label>
+                                    <br>
+
+                                    <label for="performance_monitoring">
+                                        <input type="checkbox" name="performance_monitoring" id="performance_monitoring" value="1" <?php checked($settings['performance_monitoring'], 1); ?>>
+                                        <?php echo esc_html__('Performance Monitoring', 'status-sentry-wp'); ?>
+                                    </label>
+                                </fieldset>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div id="performance" class="tab-content" style="display: none;">
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row"><?php echo esc_html__('Database Operations', 'status-sentry-wp'); ?></th>
+                            <td>
+                                <label for="db_batch_size">
+                                    <?php echo esc_html__('Batch Size', 'status-sentry-wp'); ?>
+                                    <input type="number" name="db_batch_size" id="db_batch_size" value="<?php echo esc_attr($settings['db_batch_size']); ?>" min="10" max="500" step="10">
                                 </label>
+                                <p class="description"><?php echo esc_html__('Number of items to process in a single database operation. Higher values may improve performance but use more memory.', 'status-sentry-wp'); ?></p>
+
                                 <br>
-                                
-                                <label for="db_monitoring">
-                                    <input type="checkbox" name="db_monitoring" id="db_monitoring" value="1" <?php checked($settings['db_monitoring'], 1); ?>>
-                                    <?php echo esc_html__('Database Monitoring', 'status-sentry-wp'); ?>
+
+                                <label for="enable_query_cache">
+                                    <input type="checkbox" name="enable_query_cache" id="enable_query_cache" value="1" <?php checked($settings['enable_query_cache'], 1); ?>>
+                                    <?php echo esc_html__('Enable Query Cache', 'status-sentry-wp'); ?>
                                 </label>
+                                <p class="description"><?php echo esc_html__('Cache frequent database queries to reduce database load.', 'status-sentry-wp'); ?></p>
+
                                 <br>
-                                
-                                <label for="conflict_detection">
-                                    <input type="checkbox" name="conflict_detection" id="conflict_detection" value="1" <?php checked($settings['conflict_detection'], 1); ?>>
-                                    <?php echo esc_html__('Conflict Detection', 'status-sentry-wp'); ?>
+
+                                <label for="query_cache_ttl">
+                                    <?php echo esc_html__('Query Cache TTL (seconds)', 'status-sentry-wp'); ?>
+                                    <input type="number" name="query_cache_ttl" id="query_cache_ttl" value="<?php echo esc_attr($settings['query_cache_ttl']); ?>" min="300" max="86400" step="300">
                                 </label>
+                                <p class="description"><?php echo esc_html__('Time to live for cached queries in seconds. Default is 3600 (1 hour).', 'status-sentry-wp'); ?></p>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <th scope="row"><?php echo esc_html__('Memory Management', 'status-sentry-wp'); ?></th>
+                            <td>
+                                <label for="memory_threshold">
+                                    <?php echo esc_html__('Memory Threshold (%)', 'status-sentry-wp'); ?>
+                                    <input type="number" name="memory_threshold" id="memory_threshold" value="<?php echo esc_attr($settings['memory_threshold']); ?>" min="50" max="95" step="5">
+                                </label>
+                                <p class="description"><?php echo esc_html__('Percentage of memory limit at which garbage collection is triggered. Default is 80%.', 'status-sentry-wp'); ?></p>
+
                                 <br>
-                                
-                                <label for="performance_monitoring">
-                                    <input type="checkbox" name="performance_monitoring" id="performance_monitoring" value="1" <?php checked($settings['performance_monitoring'], 1); ?>>
-                                    <?php echo esc_html__('Performance Monitoring', 'status-sentry-wp'); ?>
+
+                                <label for="gc_cycles">
+                                    <?php echo esc_html__('Garbage Collection Cycles', 'status-sentry-wp'); ?>
+                                    <input type="number" name="gc_cycles" id="gc_cycles" value="<?php echo esc_attr($settings['gc_cycles']); ?>" min="1" max="10" step="1">
                                 </label>
-                            </fieldset>
-                        </td>
-                    </tr>
-                </table>
-                
+                                <p class="description"><?php echo esc_html__('Number of garbage collection cycles to run when triggered. Default is 3.', 'status-sentry-wp'); ?></p>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <th scope="row"><?php echo esc_html__('CPU Management', 'status-sentry-wp'); ?></th>
+                            <td>
+                                <label for="cpu_threshold">
+                                    <?php echo esc_html__('CPU Threshold (%)', 'status-sentry-wp'); ?>
+                                    <input type="number" name="cpu_threshold" id="cpu_threshold" value="<?php echo esc_attr($settings['cpu_threshold']); ?>" min="30" max="90" step="5">
+                                </label>
+                                <p class="description"><?php echo esc_html__('Percentage of CPU load at which tasks are delayed. Default is 70%.', 'status-sentry-wp'); ?></p>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <th scope="row"><?php echo esc_html__('Task Processing', 'status-sentry-wp'); ?></th>
+                            <td>
+                                <label for="enable_resumable_tasks">
+                                    <input type="checkbox" name="enable_resumable_tasks" id="enable_resumable_tasks" value="1" <?php checked($settings['enable_resumable_tasks'], 1); ?>>
+                                    <?php echo esc_html__('Enable Resumable Tasks', 'status-sentry-wp'); ?>
+                                </label>
+                                <p class="description"><?php echo esc_html__('Allow long-running tasks to be resumed if they exceed resource limits.', 'status-sentry-wp'); ?></p>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div id="retention" class="tab-content" style="display: none;">
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row"><?php echo esc_html__('Data Retention', 'status-sentry-wp'); ?></th>
+                            <td>
+                                <label for="events_retention_days">
+                                    <?php echo esc_html__('Events Retention (days)', 'status-sentry-wp'); ?>
+                                    <input type="number" name="events_retention_days" id="events_retention_days" value="<?php echo esc_attr($settings['events_retention_days']); ?>" min="1" max="365" step="1">
+                                </label>
+                                <p class="description"><?php echo esc_html__('Number of days to keep events in the database. Default is 30 days.', 'status-sentry-wp'); ?></p>
+
+                                <br>
+
+                                <label for="processed_queue_retention_days">
+                                    <?php echo esc_html__('Processed Queue Items Retention (days)', 'status-sentry-wp'); ?>
+                                    <input type="number" name="processed_queue_retention_days" id="processed_queue_retention_days" value="<?php echo esc_attr($settings['processed_queue_retention_days']); ?>" min="1" max="30" step="1">
+                                </label>
+                                <p class="description"><?php echo esc_html__('Number of days to keep processed queue items. Default is 7 days.', 'status-sentry-wp'); ?></p>
+
+                                <br>
+
+                                <label for="failed_queue_retention_days">
+                                    <?php echo esc_html__('Failed Queue Items Retention (days)', 'status-sentry-wp'); ?>
+                                    <input type="number" name="failed_queue_retention_days" id="failed_queue_retention_days" value="<?php echo esc_attr($settings['failed_queue_retention_days']); ?>" min="1" max="90" step="1">
+                                </label>
+                                <p class="description"><?php echo esc_html__('Number of days to keep failed queue items. Default is 14 days.', 'status-sentry-wp'); ?></p>
+
+                                <br>
+
+                                <label for="task_runs_retention_days">
+                                    <?php echo esc_html__('Task Runs Retention (days)', 'status-sentry-wp'); ?>
+                                    <input type="number" name="task_runs_retention_days" id="task_runs_retention_days" value="<?php echo esc_attr($settings['task_runs_retention_days']); ?>" min="1" max="90" step="1">
+                                </label>
+                                <p class="description"><?php echo esc_html__('Number of days to keep task run history. Default is 30 days.', 'status-sentry-wp'); ?></p>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <script>
+                jQuery(document).ready(function($) {
+                    // Tab navigation
+                    $('.nav-tab').on('click', function(e) {
+                        e.preventDefault();
+
+                        // Hide all tab content
+                        $('.tab-content').hide();
+
+                        // Remove active class from all tabs
+                        $('.nav-tab').removeClass('nav-tab-active');
+
+                        // Show the selected tab content
+                        $($(this).attr('href')).show();
+
+                        // Add active class to the clicked tab
+                        $(this).addClass('nav-tab-active');
+                    });
+                });
+                </script>
+
                 <?php submit_button(); ?>
             </form>
         </div>
@@ -283,12 +438,12 @@ class Status_Sentry_Admin {
     public function render_events_page() {
         // Get events
         $events = $this->get_events(20);
-        
+
         // Render the events page
         ?>
         <div class="wrap">
             <h1><?php echo esc_html__('Status Sentry Events', 'status-sentry-wp'); ?></h1>
-            
+
             <?php if (empty($events)) : ?>
                 <p><?php echo esc_html__('No events found.', 'status-sentry-wp'); ?></p>
             <?php else : ?>
@@ -331,10 +486,10 @@ class Status_Sentry_Admin {
     public function render_dashboard_widget() {
         // Get event counts
         $event_counts = $this->get_event_counts();
-        
+
         // Get recent events
         $recent_events = $this->get_recent_events(3);
-        
+
         // Render the widget
         ?>
         <div class="status-sentry-dashboard-widget">
@@ -346,11 +501,11 @@ class Status_Sentry_Admin {
                     </div>
                 <?php endforeach; ?>
             </div>
-            
+
             <?php if (!empty($recent_events)) : ?>
                 <div class="status-sentry-dashboard-widget-events">
                     <h3><?php echo esc_html__('Recent Events', 'status-sentry-wp'); ?></h3>
-                    
+
                     <ul>
                         <?php foreach ($recent_events as $event) : ?>
                             <li>
@@ -362,7 +517,7 @@ class Status_Sentry_Admin {
                     </ul>
                 </div>
             <?php endif; ?>
-            
+
             <p>
                 <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry')); ?>" class="button button-small">
                     <?php echo esc_html__('View Dashboard', 'status-sentry-wp'); ?>
@@ -380,14 +535,28 @@ class Status_Sentry_Admin {
      */
     private function get_settings() {
         $defaults = [
+            // Feature settings
             'core_monitoring' => 1,
             'db_monitoring' => 1,
             'conflict_detection' => 1,
             'performance_monitoring' => 1,
+
+            // Performance settings
+            'db_batch_size' => 100,
+            'memory_threshold' => 80,
+            'gc_cycles' => 3,
+            'cpu_threshold' => 70,
+            'enable_query_cache' => 1,
+            'query_cache_ttl' => 3600,
+            'enable_resumable_tasks' => 1,
+            'events_retention_days' => 30,
+            'processed_queue_retention_days' => 7,
+            'failed_queue_retention_days' => 14,
+            'task_runs_retention_days' => 30,
         ];
-        
+
         $settings = get_option('status_sentry_settings', []);
-        
+
         return wp_parse_args($settings, $defaults);
     }
 
@@ -399,9 +568,9 @@ class Status_Sentry_Admin {
      */
     private function get_event_counts() {
         global $wpdb;
-        
+
         $table_name = $wpdb->prefix . 'status_sentry_events';
-        
+
         // Check if the table exists
         if ($wpdb->get_var("SHOW TABLES LIKE '$table_name'") != $table_name) {
             return [
@@ -411,20 +580,20 @@ class Status_Sentry_Admin {
                 'performance_monitoring' => 0,
             ];
         }
-        
+
         // Get counts for each feature
         $counts = [];
         $features = ['core_monitoring', 'db_monitoring', 'conflict_detection', 'performance_monitoring'];
-        
+
         foreach ($features as $feature) {
             $count = $wpdb->get_var($wpdb->prepare(
                 "SELECT COUNT(*) FROM $table_name WHERE feature = %s",
                 $feature
             ));
-            
+
             $counts[$feature] = $count;
         }
-        
+
         return $counts;
     }
 
@@ -437,20 +606,20 @@ class Status_Sentry_Admin {
      */
     private function get_recent_events($limit = 5) {
         global $wpdb;
-        
+
         $table_name = $wpdb->prefix . 'status_sentry_events';
-        
+
         // Check if the table exists
         if ($wpdb->get_var("SHOW TABLES LIKE '$table_name'") != $table_name) {
             return [];
         }
-        
+
         // Get recent events
         $events = $wpdb->get_results($wpdb->prepare(
             "SELECT id, feature, hook, event_time FROM $table_name ORDER BY event_time DESC LIMIT %d",
             $limit
         ));
-        
+
         return $events;
     }
 
@@ -463,20 +632,20 @@ class Status_Sentry_Admin {
      */
     private function get_events($limit = 20) {
         global $wpdb;
-        
+
         $table_name = $wpdb->prefix . 'status_sentry_events';
-        
+
         // Check if the table exists
         if ($wpdb->get_var("SHOW TABLES LIKE '$table_name'") != $table_name) {
             return [];
         }
-        
+
         // Get events
         $events = $wpdb->get_results($wpdb->prepare(
             "SELECT id, feature, hook, event_time FROM $table_name ORDER BY event_time DESC LIMIT %d",
             $limit
         ));
-        
+
         return $events;
     }
 }

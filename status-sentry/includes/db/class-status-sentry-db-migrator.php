@@ -218,6 +218,18 @@ class Status_Sentry_DB_Migrator {
             }
         }
 
+        // Add hardcoded migrations for 1.2.0
+        // This ensures that the new migrations are included even if the files don't exist yet
+        if (!isset($migrations[5])) {
+            $migrations[5] = $this->migrations_dir . '005_create_task_state_table.php';
+        }
+        if (!isset($migrations[6])) {
+            $migrations[6] = $this->migrations_dir . '006_create_query_cache_table.php';
+        }
+        if (!isset($migrations[7])) {
+            $migrations[7] = $this->migrations_dir . '007_add_composite_indexes.php';
+        }
+
         return $migrations;
     }
 

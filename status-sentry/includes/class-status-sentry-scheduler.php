@@ -25,6 +25,9 @@
  * - Track task execution history
  * - Implement tiered scheduling with different priorities
  * - Provide per-task locking to prevent concurrent execution
+ * - Support resumable tasks with state persistence
+ * - Trigger garbage collection after resource-intensive tasks
+ * - Adapt scheduling based on system load
  *
  * The scheduler uses WordPress's built-in cron system (WP-Cron) which runs
  * when a page is loaded. For high-traffic sites, this works well. For low-traffic
@@ -65,6 +68,15 @@ class Status_Sentry_Scheduler {
     private static $resource_manager = null;
 
     /**
+     * Task state manager instance.
+     *
+     * @since    1.2.0
+     * @access   private
+     * @var      Status_Sentry_Task_State_Manager    $task_state_manager    The task state manager instance.
+     */
+    private static $task_state_manager = null;
+
+    /**
      * Initialize the scheduler.
      *
      * @since    1.1.0
@@ -73,14 +85,20 @@ class Status_Sentry_Scheduler {
         // Load dependencies
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-self-monitor.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-resource-manager.php';
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-task-state-manager.php';
 
         // Initialize monitoring components
         self::$self_monitor = new Status_Sentry_Self_Monitor();
         self::$resource_manager = new Status_Sentry_Resource_Manager();
+        self::$task_state_manager = new Status_Sentry_Task_State_Manager();
 
         // Register default tasks
         self::register_task('process_queue', 'status_sentry_process_queue', 'standard', 'five_minutes');
         self::register_task('cleanup', 'status_sentry_cleanup', 'intensive', 'daily');
+
+        // Register new tasks for 1.2.0
+        self::register_task('cleanup_expired_cache', 'status_sentry_cleanup_expired_cache', 'standard', 'hourly');
+        self::register_task('cleanup_expired_task_state', 'status_sentry_cleanup_expired_task_state', 'standard', 'daily');
 
         // Allow other components to register tasks
         do_action('status_sentry_register_tasks');
@@ -154,6 +172,18 @@ class Status_Sentry_Scheduler {
             return false;
         }
 
+        // Generate a unique key for this task instance
+        $task_key = uniqid($task_name . '_', true);
+
+        // Check if there's a saved state for this task
+        $saved_state = self::$task_state_manager->get_state($task_name, 'latest');
+        if ($saved_state) {
+            error_log(sprintf('Status Sentry: Found saved state for task "%s", resuming from previous execution', $task_name));
+
+            // Add the saved state to the arguments
+            $args['_saved_state'] = $saved_state;
+        }
+
         // Start monitoring
         $task_run_id = self::$self_monitor->start_task($task_name, $tier);
         $start_time = microtime(true);
@@ -164,18 +194,53 @@ class Status_Sentry_Scheduler {
             error_log(sprintf('Status Sentry: Starting task "%s" (%s tier)', $task_name, $tier));
             $result = call_user_func_array($callback, $args);
 
-            // End monitoring with success status
-            self::$self_monitor->end_task($task_run_id, 'completed');
+            // Check if the result contains a state to save for resumption
+            if (is_array($result) && isset($result['_save_state']) && $result['_save_state'] === true) {
+                // Save the state for later resumption
+                $state_data = isset($result['_state']) ? $result['_state'] : [];
+                $ttl = isset($result['_state_ttl']) ? $result['_state_ttl'] : 3600; // Default 1 hour
 
-            // Log completion
-            $execution_time = microtime(true) - $start_time;
-            error_log(sprintf(
-                'Status Sentry: Task "%s" completed successfully in %.2f seconds',
-                $task_name,
-                $execution_time
-            ));
+                self::$task_state_manager->save_state($task_name, 'latest', $state_data, $ttl);
 
-            return $result;
+                error_log(sprintf('Status Sentry: Saved state for task "%s" for later resumption', $task_name));
+
+                // End monitoring with partial completion status
+                self::$self_monitor->end_task($task_run_id, 'partial');
+
+                // Schedule immediate continuation if requested
+                if (isset($result['_schedule_continuation']) && $result['_schedule_continuation'] === true) {
+                    $continuation_delay = isset($result['_continuation_delay']) ? $result['_continuation_delay'] : 60; // Default 1 minute
+                    wp_schedule_single_event(time() + $continuation_delay, $task['hook']);
+
+                    error_log(sprintf('Status Sentry: Scheduled continuation of task "%s" in %d seconds', $task_name, $continuation_delay));
+                }
+
+                // Return the actual result if provided
+                return isset($result['_result']) ? $result['_result'] : true;
+            } else {
+                // Task completed successfully, delete any saved state
+                if ($saved_state) {
+                    self::$task_state_manager->delete_state($task_name, 'latest');
+                }
+
+                // End monitoring with success status
+                self::$self_monitor->end_task($task_run_id, 'completed');
+
+                // Check if we should trigger garbage collection
+                if (self::$resource_manager->should_trigger_gc_after_task($task_name)) {
+                    self::$resource_manager->trigger_gc();
+                }
+
+                // Log completion
+                $execution_time = microtime(true) - $start_time;
+                error_log(sprintf(
+                    'Status Sentry: Task "%s" completed successfully in %.2f seconds',
+                    $task_name,
+                    $execution_time
+                ));
+
+                return $result;
+            }
         } catch (Exception $e) {
             // End monitoring with failure status
             self::$self_monitor->end_task($task_run_id, 'failed', $e->getMessage());
@@ -190,6 +255,11 @@ class Status_Sentry_Scheduler {
             // Try to log a stack trace if available
             if (method_exists($e, 'getTraceAsString')) {
                 error_log('Status Sentry: Stack trace - ' . $e->getTraceAsString());
+            }
+
+            // Check if we should trigger garbage collection
+            if (self::$resource_manager->should_trigger_gc_after_task($task_name)) {
+                self::$resource_manager->trigger_gc();
             }
 
             return false;
@@ -207,6 +277,11 @@ class Status_Sentry_Scheduler {
             // Try to log a stack trace if available
             if (method_exists($e, 'getTraceAsString')) {
                 error_log('Status Sentry: Stack trace - ' . $e->getTraceAsString());
+            }
+
+            // Check if we should trigger garbage collection
+            if (self::$resource_manager->should_trigger_gc_after_task($task_name)) {
+                self::$resource_manager->trigger_gc();
             }
 
             return false;
@@ -514,6 +589,82 @@ class Status_Sentry_Scheduler {
                 self::$self_monitor->baseline->record_metric('queue_processing_memory', 'standard', memory_get_peak_usage() - $memory_start);
                 self::$self_monitor->baseline->record_metric('queue_processing_queries', 'standard', get_num_queries() - $db_queries_start);
             }
+        }
+    }
+
+    /**
+     * Clean up expired cache entries.
+     *
+     * This method is called by WordPress cron to clean up expired cache entries.
+     * It helps prevent database bloat from old cache data.
+     *
+     * @since    1.2.0
+     * @return   int    The number of expired cache entries deleted.
+     */
+    public static function cleanup_expired_cache() {
+        $start_time = microtime(true);
+        $memory_start = memory_get_usage();
+
+        error_log('Status Sentry: Starting expired cache cleanup');
+
+        try {
+            // Create a query cache instance
+            require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/db/class-status-sentry-query-cache.php';
+            $query_cache = new Status_Sentry_Query_Cache();
+
+            // Clean up expired cache entries
+            $deleted = $query_cache->cleanup_expired();
+
+            // Log the result
+            error_log(sprintf(
+                'Status Sentry: Deleted %d expired cache entries in %.2f seconds',
+                $deleted,
+                microtime(true) - $start_time
+            ));
+
+            return $deleted;
+        } catch (Exception $e) {
+            error_log('Status Sentry: Exception during cache cleanup - ' . $e->getMessage());
+            return 0;
+        } catch (Error $e) {
+            error_log('Status Sentry: Error during cache cleanup - ' . $e->getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Clean up expired task state.
+     *
+     * This method is called by WordPress cron to clean up expired task state.
+     * It helps prevent database bloat from old task state data.
+     *
+     * @since    1.2.0
+     * @return   int    The number of expired task states deleted.
+     */
+    public static function cleanup_expired_task_state() {
+        $start_time = microtime(true);
+        $memory_start = memory_get_usage();
+
+        error_log('Status Sentry: Starting expired task state cleanup');
+
+        try {
+            // Clean up expired task state
+            $deleted = self::$task_state_manager->cleanup_expired();
+
+            // Log the result
+            error_log(sprintf(
+                'Status Sentry: Deleted %d expired task states in %.2f seconds',
+                $deleted,
+                microtime(true) - $start_time
+            ));
+
+            return $deleted;
+        } catch (Exception $e) {
+            error_log('Status Sentry: Exception during task state cleanup - ' . $e->getMessage());
+            return 0;
+        } catch (Error $e) {
+            error_log('Status Sentry: Error during task state cleanup - ' . $e->getMessage());
+            return 0;
         }
     }
 

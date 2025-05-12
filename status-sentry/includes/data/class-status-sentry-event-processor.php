@@ -22,6 +22,10 @@
  * - Store processed events in the events table
  * - Clean up old events to prevent database bloat
  * - Handle database errors gracefully
+ * - Use generators for memory-efficient processing
+ * - Support batch database operations
+ * - Implement query caching for frequent operations
+ * - Support resumable processing for large datasets
  *
  * The processor uses feature-specific enrichment methods to add relevant
  * context to different types of events, making the data more valuable for
@@ -53,6 +57,24 @@ class Status_Sentry_Event_Processor {
     private $table_name;
 
     /**
+     * The query cache instance.
+     *
+     * @since    1.2.0
+     * @access   private
+     * @var      Status_Sentry_Query_Cache    $query_cache    The query cache instance.
+     */
+    private $query_cache;
+
+    /**
+     * Batch size for database operations.
+     *
+     * @since    1.2.0
+     * @access   private
+     * @var      int    $db_batch_size    The batch size for database operations.
+     */
+    private $db_batch_size;
+
+    /**
      * Initialize the class and set its properties.
      *
      * @since    1.0.0
@@ -62,6 +84,13 @@ class Status_Sentry_Event_Processor {
 
         global $wpdb;
         $this->table_name = $wpdb->prefix . 'status_sentry_events';
+
+        // Initialize query cache
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/db/class-status-sentry-query-cache.php';
+        $this->query_cache = new Status_Sentry_Query_Cache();
+
+        // Set default batch size for database operations
+        $this->db_batch_size = apply_filters('status_sentry_db_batch_size', 100);
     }
 
     /**
@@ -76,11 +105,15 @@ class Status_Sentry_Event_Processor {
      * when processing multiple events. If a transaction is not available, it falls
      * back to processing events individually.
      *
+     * In version 1.2.0, this method was enhanced to use generators for memory-efficient
+     * processing and to support resumable processing for large datasets.
+     *
      * @since    1.0.0
      * @param    int    $batch_size    The number of events to process in a batch.
-     * @return   int                   The number of events processed.
+     * @param    array  $saved_state   Optional. The saved state from a previous run.
+     * @return   int|array             The number of events processed or a state array for resumption.
      */
-    public function process_events($batch_size = 100) {
+    public function process_events($batch_size = 100, $saved_state = null) {
         global $wpdb;
 
         // Validate input
@@ -89,17 +122,164 @@ class Status_Sentry_Event_Processor {
             $batch_size = 100; // Default to 100 if invalid
         }
 
-        // Get events from the queue
-        try {
-            $events = $this->event_queue->get_events($batch_size);
-        } catch (Exception $e) {
-            error_log('Status Sentry: Error retrieving events from queue - ' . $e->getMessage());
-            return 0;
+        // Initialize state
+        $state = [
+            'processed_count' => 0,
+            'failed_count' => 0,
+            'last_id' => 0,
+            'start_time' => microtime(true),
+            'memory_start' => memory_get_usage(),
+        ];
+
+        // Restore state if provided
+        if (is_array($saved_state) && isset($saved_state['last_id'])) {
+            $state['last_id'] = $saved_state['last_id'];
+            $state['processed_count'] = $saved_state['processed_count'] ?? 0;
+            $state['failed_count'] = $saved_state['failed_count'] ?? 0;
+
+            error_log(sprintf(
+                'Status Sentry: Resuming event processing from ID %d (processed: %d, failed: %d)',
+                $state['last_id'],
+                $state['processed_count'],
+                $state['failed_count']
+            ));
         }
 
-        if (empty($events)) {
-            return 0;
+        // Process events using a generator to reduce memory usage
+        $event_generator = $this->get_events_generator($batch_size, $state['last_id']);
+        $events_processed = 0;
+        $batch_events = [];
+
+        // Process events in smaller batches for database operations
+        foreach ($event_generator as $event) {
+            // Skip invalid events
+            if (!isset($event['id']) || !isset($event['feature']) || !isset($event['hook'])) {
+                error_log('Status Sentry: Skipping invalid event - missing required fields');
+                continue;
+            }
+
+            // Add event to batch
+            $batch_events[] = $event;
+            $state['last_id'] = max($state['last_id'], $event['id']);
+
+            // Process batch when it reaches the batch size
+            if (count($batch_events) >= $this->db_batch_size) {
+                $batch_result = $this->process_event_batch($batch_events, $state);
+                $state = $batch_result['state'];
+                $events_processed += $batch_result['processed'];
+                $batch_events = [];
+
+                // Check if we should stop processing and save state
+                if ($this->should_stop_processing($state['start_time'], $state['memory_start'])) {
+                    error_log('Status Sentry: Stopping batch processing early due to resource constraints');
+
+                    // Return state for resumption
+                    return [
+                        '_save_state' => true,
+                        '_state' => $state,
+                        '_schedule_continuation' => true,
+                        '_continuation_delay' => 60, // 1 minute
+                        '_result' => $state['processed_count'],
+                    ];
+                }
+
+                // Check if we've processed enough events
+                if ($events_processed >= $batch_size) {
+                    break;
+                }
+            }
         }
+
+        // Process any remaining events
+        if (!empty($batch_events)) {
+            $batch_result = $this->process_event_batch($batch_events, $state);
+            $state = $batch_result['state'];
+            $events_processed += $batch_result['processed'];
+        }
+
+        // Log processing statistics
+        error_log(sprintf(
+            'Status Sentry: Processed %d events, %d failed, in %.2f seconds',
+            $state['processed_count'],
+            $state['failed_count'],
+            microtime(true) - $state['start_time']
+        ));
+
+        // Clean up old processed events (only if we successfully processed some events)
+        if ($state['processed_count'] > 0) {
+            try {
+                $retention_days = apply_filters('status_sentry_processed_queue_retention_days', 1); // Default 1 day
+                $deleted = $this->event_queue->delete_events('processed', $retention_days * 86400);
+                if ($deleted > 0) {
+                    error_log(sprintf('Status Sentry: Cleaned up %d old processed events', $deleted));
+                }
+            } catch (Exception $e) {
+                error_log('Status Sentry: Error cleaning up old events - ' . $e->getMessage());
+            }
+        }
+
+        return $state['processed_count'];
+    }
+
+    /**
+     * Get events from the queue as a generator.
+     *
+     * This method retrieves events from the queue in small batches and yields
+     * them one by one, reducing memory usage for large datasets.
+     *
+     * @since    1.2.0
+     * @access   private
+     * @param    int    $total_limit    The total number of events to retrieve.
+     * @param    int    $last_id        Optional. The last ID processed in a previous run.
+     * @yield    array                  The next event from the queue.
+     */
+    private function get_events_generator($total_limit, $last_id = 0) {
+        $batch_size = min($this->db_batch_size, $total_limit);
+        $events_yielded = 0;
+        $current_last_id = $last_id;
+
+        while ($events_yielded < $total_limit) {
+            // Get a batch of events
+            try {
+                $events = $this->event_queue->get_events_after_id($batch_size, $current_last_id);
+            } catch (Exception $e) {
+                error_log('Status Sentry: Error retrieving events from queue - ' . $e->getMessage());
+                break;
+            }
+
+            // If no more events, we're done
+            if (empty($events)) {
+                break;
+            }
+
+            // Yield each event
+            foreach ($events as $event) {
+                yield $event;
+                $events_yielded++;
+                $current_last_id = max($current_last_id, $event['id']);
+
+                // If we've reached the limit, we're done
+                if ($events_yielded >= $total_limit) {
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * Process a batch of events.
+     *
+     * This method processes a batch of events in a single transaction if possible,
+     * improving performance for database operations.
+     *
+     * @since    1.2.0
+     * @access   private
+     * @param    array    $events    The events to process.
+     * @param    array    $state     The current processing state.
+     * @return   array               The result of processing the batch.
+     */
+    private function process_event_batch($events, $state) {
+        global $wpdb;
 
         // Check if we can use transactions
         $use_transaction = method_exists($wpdb, 'query') &&
@@ -112,48 +292,60 @@ class Status_Sentry_Event_Processor {
             $wpdb->query('START TRANSACTION');
         }
 
-        // Process each event
         $processed_count = 0;
         $failed_count = 0;
-        $start_time = microtime(true);
-        $memory_start = memory_get_usage();
+        $processed_ids = [];
+        $failed_ids = [];
 
+        // Process each event
         foreach ($events as $event) {
-            // Skip invalid events
-            if (!isset($event['id']) || !isset($event['feature']) || !isset($event['hook'])) {
-                error_log('Status Sentry: Skipping invalid event - missing required fields');
-                continue;
-            }
-
-            // Process the event
             try {
                 $success = $this->process_event($event);
 
-                // Update the event status
                 if ($success) {
-                    $this->event_queue->update_event_status($event['id'], 'processed');
+                    $processed_ids[] = $event['id'];
                     $processed_count++;
                 } else {
-                    $this->event_queue->update_event_status($event['id'], 'failed');
+                    $failed_ids[] = $event['id'];
                     $failed_count++;
                 }
             } catch (Exception $e) {
                 error_log('Status Sentry: Error processing event - ' . $e->getMessage());
-
-                // Try to update the event status
-                try {
-                    $this->event_queue->update_event_status($event['id'], 'failed');
-                } catch (Exception $update_error) {
-                    error_log('Status Sentry: Error updating event status - ' . $update_error->getMessage());
-                }
-
+                $failed_ids[] = $event['id'];
                 $failed_count++;
             }
+        }
 
-            // Check if we're approaching memory limit or time limit
-            if ($this->should_stop_processing($start_time, $memory_start)) {
-                error_log('Status Sentry: Stopping batch processing early due to resource constraints');
-                break;
+        // Update event statuses in batch
+        if (!empty($processed_ids)) {
+            try {
+                $this->event_queue->update_event_statuses($processed_ids, 'processed');
+            } catch (Exception $e) {
+                error_log('Status Sentry: Error updating processed event statuses - ' . $e->getMessage());
+                // Fall back to individual updates
+                foreach ($processed_ids as $id) {
+                    try {
+                        $this->event_queue->update_event_status($id, 'processed');
+                    } catch (Exception $update_error) {
+                        error_log('Status Sentry: Error updating event status - ' . $update_error->getMessage());
+                    }
+                }
+            }
+        }
+
+        if (!empty($failed_ids)) {
+            try {
+                $this->event_queue->update_event_statuses($failed_ids, 'failed');
+            } catch (Exception $e) {
+                error_log('Status Sentry: Error updating failed event statuses - ' . $e->getMessage());
+                // Fall back to individual updates
+                foreach ($failed_ids as $id) {
+                    try {
+                        $this->event_queue->update_event_status($id, 'failed');
+                    } catch (Exception $update_error) {
+                        error_log('Status Sentry: Error updating event status - ' . $update_error->getMessage());
+                    }
+                }
             }
         }
 
@@ -162,28 +354,15 @@ class Status_Sentry_Event_Processor {
             $wpdb->query('COMMIT');
         }
 
-        // Log processing statistics
-        error_log(sprintf(
-            'Status Sentry: Processed %d events, %d failed, %d total, in %.2f seconds',
-            $processed_count,
-            $failed_count,
-            count($events),
-            microtime(true) - $start_time
-        ));
+        // Update state
+        $state['processed_count'] += $processed_count;
+        $state['failed_count'] += $failed_count;
 
-        // Clean up old processed events (only if we successfully processed some events)
-        if ($processed_count > 0) {
-            try {
-                $deleted = $this->event_queue->delete_events('processed', 86400); // 24 hours
-                if ($deleted > 0) {
-                    error_log(sprintf('Status Sentry: Cleaned up %d old processed events', $deleted));
-                }
-            } catch (Exception $e) {
-                error_log('Status Sentry: Error cleaning up old events - ' . $e->getMessage());
-            }
-        }
-
-        return $processed_count;
+        return [
+            'processed' => $processed_count,
+            'failed' => $failed_count,
+            'state' => $state,
+        ];
     }
 
     /**

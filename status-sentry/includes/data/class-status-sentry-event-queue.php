@@ -22,6 +22,9 @@
  * - Delete old events to prevent database bloat
  * - Create and manage the queue database table
  * - Schedule immediate processing when the queue gets too large
+ * - Support batch operations for improved performance
+ * - Support resumable processing with ID-based retrieval
+ * - Implement efficient cleanup strategies
  *
  * The queue uses a database table with the following structure:
  * - id: Unique identifier for the queue item
@@ -32,7 +35,7 @@
  * - status: Processing status ('pending', 'processed', 'failed')
  *
  * @since      1.0.0
- * @version    1.1.0
+ * @version    1.2.0
  * @package    Status_Sentry
  * @subpackage Status_Sentry/includes/data
  * @author     Status Sentry Team
@@ -491,6 +494,141 @@ class Status_Sentry_Event_Queue {
         // If there are more than 100 pending events, schedule immediate processing
         if ($count > 100 && !wp_next_scheduled('status_sentry_process_queue')) {
             wp_schedule_single_event(time(), 'status_sentry_process_queue');
+        }
+    }
+
+    /**
+     * Get events from the queue after a specific ID.
+     *
+     * This method retrieves events from the queue that have an ID greater than
+     * the specified ID. It is used for resumable processing of large datasets.
+     *
+     * @since    1.2.0
+     * @param    int       $limit     The maximum number of events to get.
+     * @param    int       $after_id  The ID to start from (exclusive).
+     * @param    string    $status    The status of events to get (default: 'pending').
+     * @return   array                The events as associative arrays.
+     * @throws   Exception            If there is an error retrieving events.
+     */
+    public function get_events_after_id($limit = 100, $after_id = 0, $status = 'pending') {
+        global $wpdb;
+
+        // Validate input parameters
+        $limit = absint($limit);
+        if ($limit <= 0) {
+            $limit = 100; // Default to 100 if invalid
+        }
+
+        $after_id = absint($after_id);
+
+        if (!in_array($status, ['pending', 'processed', 'failed'])) {
+            $status = 'pending'; // Default to 'pending' if invalid
+        }
+
+        // Check if the queue table exists
+        if ($wpdb->get_var("SHOW TABLES LIKE '{$this->table_name}'") != $this->table_name) {
+            error_log('Status Sentry: Queue table does not exist');
+            return [];
+        }
+
+        try {
+            // Get events from the queue
+            $events = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT * FROM {$this->table_name} WHERE status = %s AND id > %d ORDER BY id ASC LIMIT %d",
+                    $status,
+                    $after_id,
+                    $limit
+                ),
+                ARRAY_A
+            );
+
+            if ($wpdb->last_error) {
+                error_log('Status Sentry: Error retrieving events from queue - ' . $wpdb->last_error);
+                return [];
+            }
+
+            // Decode the data with error handling
+            foreach ($events as &$event) {
+                try {
+                    $event['data'] = json_decode($event['data'], true);
+
+                    // Check for JSON decoding errors
+                    if (json_last_error() !== JSON_ERROR_NONE) {
+                        error_log('Status Sentry: Error decoding JSON data for event ' . $event['id'] . ' - ' . json_last_error_msg());
+                        $event['data'] = [
+                            'error' => 'JSON decoding failed: ' . json_last_error_msg(),
+                            'raw_data' => substr($event['data'], 0, 100) . '...' // Include a snippet of the raw data
+                        ];
+                    }
+                } catch (Exception $e) {
+                    error_log('Status Sentry: Exception decoding JSON data for event ' . $event['id'] . ' - ' . $e->getMessage());
+                    $event['data'] = ['error' => 'Exception during JSON decoding: ' . $e->getMessage()];
+                }
+            }
+
+            return $events;
+        } catch (Exception $e) {
+            error_log('Status Sentry: Exception retrieving events from queue - ' . $e->getMessage());
+            throw $e; // Re-throw to be caught by the caller
+        }
+    }
+
+    /**
+     * Update multiple event statuses at once.
+     *
+     * This method updates the status of multiple events in the queue in a single
+     * database operation, improving performance for batch processing.
+     *
+     * @since    1.2.0
+     * @param    array     $ids       The event IDs.
+     * @param    string    $status    The new status ('pending', 'processed', or 'failed').
+     * @return   int                  The number of events updated.
+     * @throws   Exception            If there is an error updating the statuses.
+     */
+    public function update_event_statuses($ids, $status) {
+        global $wpdb;
+
+        // Validate input parameters
+        if (empty($ids) || !is_array($ids)) {
+            error_log('Status Sentry: Invalid event IDs for status update');
+            return 0;
+        }
+
+        if (!in_array($status, ['pending', 'processed', 'failed'])) {
+            error_log('Status Sentry: Invalid status for event update: ' . $status);
+            return 0;
+        }
+
+        try {
+            // Sanitize IDs
+            $ids = array_map('absint', $ids);
+            $ids = array_filter($ids); // Remove any zero values
+
+            if (empty($ids)) {
+                return 0;
+            }
+
+            // Convert IDs to a comma-separated string for the IN clause
+            $id_string = implode(',', $ids);
+
+            // Update the event statuses
+            $result = $wpdb->query(
+                $wpdb->prepare(
+                    "UPDATE {$this->table_name} SET status = %s WHERE id IN ({$id_string})",
+                    $status
+                )
+            );
+
+            if ($result === false) {
+                error_log('Status Sentry: Error updating event statuses - ' . $wpdb->last_error);
+                return 0;
+            }
+
+            return $result;
+        } catch (Exception $e) {
+            error_log('Status Sentry: Exception updating event statuses - ' . $e->getMessage());
+            throw $e; // Re-throw to be caught by the caller
         }
     }
 }

@@ -62,10 +62,14 @@ class Status_Sentry {
         // Event processing
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/data/class-status-sentry-event-processor.php';
 
+        // Database
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/db/class-status-sentry-query-cache.php';
+
         // Monitoring
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-baseline.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-self-monitor.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-resource-manager.php';
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-task-state-manager.php';
 
         // Scheduler
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/class-status-sentry-scheduler.php';
@@ -113,6 +117,10 @@ class Status_Sentry {
 
         // Initialize scheduler
         Status_Sentry_Scheduler::init();
+
+        // Register cleanup hooks
+        add_action('status_sentry_cleanup_expired_cache', ['Status_Sentry_Scheduler', 'cleanup_expired_cache']);
+        add_action('status_sentry_cleanup_expired_task_state', ['Status_Sentry_Scheduler', 'cleanup_expired_task_state']);
 
         // Register hooks
         $this->hook_manager->register_hooks();

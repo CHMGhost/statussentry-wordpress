@@ -7,14 +7,14 @@
  *
  * @link              https://github.com/status-sentry/status-sentry-wp
  * @since             1.0.0
- * @version           1.1.0
+ * @version           1.2.0
  * @package           Status_Sentry
  *
  * @wordpress-plugin
  * Plugin Name:       Status Sentry WP
  * Plugin URI:        https://github.com/status-sentry/status-sentry-wp
  * Description:       A comprehensive WordPress plugin for monitoring site health, capturing performance data, and detecting plugin conflicts with minimal impact.
- * Version:           1.1.0
+ * Version:           1.2.0
  * Author:            Status Sentry Team
  * Author URI:        https://github.com/status-sentry
  * License:           GPL-2.0+
@@ -39,7 +39,7 @@ if (!defined('WPINC')) {
  *
  * @since 1.0.0
  */
-define('STATUS_SENTRY_VERSION', '1.1.0');                         // Plugin version for cache busting and version checks
+define('STATUS_SENTRY_VERSION', '1.2.0');                         // Plugin version for cache busting and version checks
 define('STATUS_SENTRY_PLUGIN_DIR', plugin_dir_path(__FILE__));    // Plugin directory path with trailing slash
 define('STATUS_SENTRY_PLUGIN_URL', plugin_dir_url(__FILE__));     // Plugin directory URL with trailing slash
 define('STATUS_SENTRY_PLUGIN_BASENAME', plugin_basename(__FILE__)); // Plugin basename for plugin_action_links filter
@@ -119,7 +119,7 @@ spl_autoload_register(function ($class_name) {
     }
 
     // Check in subdirectories
-    $directories = ['hooks', 'data', 'db', 'admin'];
+    $directories = ['hooks', 'data', 'db', 'admin', 'monitoring'];
     foreach ($directories as $dir) {
         $file = STATUS_SENTRY_PLUGIN_DIR . 'includes/' . $dir . '/class-' . $class_file . '.php';
         if (file_exists($file)) {
