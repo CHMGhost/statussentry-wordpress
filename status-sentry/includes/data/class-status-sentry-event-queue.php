@@ -52,6 +52,15 @@ class Status_Sentry_Event_Queue {
     private $table_name;
 
     /**
+     * Batch size threshold for immediate processing.
+     *
+     * @since    1.5.0
+     * @access   private
+     * @var      int    $batch_threshold    Batch size threshold for immediate processing.
+     */
+    private $batch_threshold;
+
+    /**
      * Initialize the class and set its properties.
      *
      * @since    1.0.0
@@ -59,6 +68,9 @@ class Status_Sentry_Event_Queue {
     public function __construct() {
         global $wpdb;
         $this->table_name = $wpdb->prefix . 'status_sentry_queue';
+
+        // Set default batch threshold (100) and allow it to be filtered
+        $this->batch_threshold = apply_filters('status_sentry_queue_threshold', 100);
     }
 
     /**
@@ -477,6 +489,10 @@ class Status_Sentry_Event_Queue {
     /**
      * Schedule immediate processing if necessary.
      *
+     * This method checks if the number of pending events exceeds the batch threshold
+     * and schedules immediate processing if needed. The threshold is configurable
+     * via the 'status_sentry_queue_threshold' filter.
+     *
      * @since    1.0.0
      * @access   private
      */
@@ -491,8 +507,13 @@ class Status_Sentry_Event_Queue {
             )
         );
 
-        // If there are more than 100 pending events, schedule immediate processing
-        if ($count > 100 && !wp_next_scheduled('status_sentry_process_queue')) {
+        // If there are more than the threshold of pending events, schedule immediate processing
+        if ($count > $this->batch_threshold && !wp_next_scheduled('status_sentry_process_queue')) {
+            error_log(sprintf(
+                'Status Sentry: Queue size (%d) exceeds threshold (%d), scheduling immediate processing',
+                $count,
+                $this->batch_threshold
+            ));
             wp_schedule_single_event(time(), 'status_sentry_process_queue');
         }
     }

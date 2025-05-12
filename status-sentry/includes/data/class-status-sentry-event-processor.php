@@ -31,6 +31,33 @@
  * context to different types of events, making the data more valuable for
  * analysis and troubleshooting.
  *
+ * Resumable Processing:
+ * The processor supports resumable processing for large datasets through the
+ * following mechanism:
+ *
+ * 1. When processing events, it checks resource usage (memory, time, CPU)
+ * 2. If resources are constrained, it saves its state and returns a special array:
+ *    ```php
+ *    return [
+ *        '_save_state' => true,
+ *        '_state' => [
+ *            'last_id' => $last_processed_id,
+ *            'processed_count' => $processed_so_far,
+ *            'failed_count' => $failed_so_far
+ *        ],
+ *        '_schedule_continuation' => true,
+ *        '_continuation_delay' => 60, // seconds
+ *        '_result' => $processed_count
+ *    ];
+ *    ```
+ * 3. The scheduler detects this special return value and:
+ *    - Saves the state for later resumption
+ *    - Schedules a continuation task after the specified delay
+ * 4. When the task runs again, it retrieves the saved state and resumes from where it left off
+ *
+ * This approach ensures that large datasets can be processed efficiently without
+ * exhausting server resources, and processing can be resumed after interruptions.
+ *
  * @since      1.0.0
  * @package    Status_Sentry
  * @subpackage Status_Sentry/includes/data
@@ -90,7 +117,9 @@ class Status_Sentry_Event_Processor {
         $this->query_cache = new Status_Sentry_Query_Cache();
 
         // Set default batch size for database operations
-        $this->db_batch_size = apply_filters('status_sentry_db_batch_size', 100);
+        // This can be configured in the Performance settings tab
+        $saved_batch_size = get_option('status_sentry_db_batch_size', 100);
+        $this->db_batch_size = apply_filters('status_sentry_db_batch_size', $saved_batch_size);
     }
 
     /**

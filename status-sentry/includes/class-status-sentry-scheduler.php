@@ -50,6 +50,15 @@ class Status_Sentry_Scheduler {
     private static $tasks = [];
 
     /**
+     * Task dependencies.
+     *
+     * @since    1.4.0
+     * @access   private
+     * @var      array    $dependencies    The task dependencies.
+     */
+    private static $dependencies = [];
+
+    /**
      * Self-monitor instance.
      *
      * @since    1.1.0
@@ -77,6 +86,24 @@ class Status_Sentry_Scheduler {
     private static $task_state_manager = null;
 
     /**
+     * Cron logger instance.
+     *
+     * @since    1.4.0
+     * @access   private
+     * @var      Status_Sentry_Cron_Logger    $cron_logger    The cron logger instance.
+     */
+    private static $cron_logger = null;
+
+    /**
+     * Health checker instance.
+     *
+     * @since    1.4.0
+     * @access   private
+     * @var      Status_Sentry_Health_Checker    $health_checker    The health checker instance.
+     */
+    private static $health_checker = null;
+
+    /**
      * Initialize the scheduler.
      *
      * @since    1.1.0
@@ -91,11 +118,19 @@ class Status_Sentry_Scheduler {
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-self-monitor.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-resource-manager.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-task-state-manager.php';
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-cron-logger.php';
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-health-checker.php';
 
         // Initialize monitoring components
         self::$self_monitor = new Status_Sentry_Self_Monitor();
         self::$resource_manager = new Status_Sentry_Resource_Manager();
         self::$task_state_manager = new Status_Sentry_Task_State_Manager();
+        self::$cron_logger = new Status_Sentry_Cron_Logger();
+        self::$health_checker = new Status_Sentry_Health_Checker();
+
+        // Initialize monitoring components
+        self::$cron_logger->init();
+        self::$health_checker->init();
 
         // Register default tasks
         self::register_task('process_queue', 'status_sentry_process_queue', 'standard', 'five_minutes');
@@ -119,9 +154,10 @@ class Status_Sentry_Scheduler {
      * @param    string    $schedule       The schedule for the task (e.g., 'five_minutes', 'hourly', 'daily').
      * @param    array     $callback       Optional. The callback function to execute. Default is [self::class, $task_name].
      * @param    array     $args           Optional. Arguments to pass to the callback. Default is [].
+     * @param    array     $dependencies   Optional. Task dependencies. Default is [].
      * @return   bool                      Whether the task was successfully registered.
      */
-    public static function register_task($task_name, $hook, $tier, $schedule, $callback = null, $args = []) {
+    public static function register_task($task_name, $hook, $tier, $schedule, $callback = null, $args = [], $dependencies = []) {
         // Validate tier
         $valid_tiers = ['critical', 'standard', 'intensive', 'report'];
         if (!in_array($tier, $valid_tiers)) {
@@ -143,10 +179,78 @@ class Status_Sentry_Scheduler {
             'args' => $args,
         ];
 
+        // Register dependencies
+        if (!empty($dependencies)) {
+            self::$dependencies[$task_name] = $dependencies;
+            error_log(sprintf('Status Sentry: Registered dependencies for task "%s": %s', $task_name, implode(', ', $dependencies)));
+        }
+
         // Register the callback
         add_action($hook, function() use ($task_name, $callback, $args) {
-            self::execute_task($task_name, $callback, $args);
+            // Check if dependencies are satisfied before executing
+            if (self::check_dependencies($task_name)) {
+                self::execute_task($task_name, $callback, $args);
+            } else {
+                error_log(sprintf('Status Sentry: Skipping task "%s" because dependencies are not satisfied', $task_name));
+
+                // Log the skipped execution
+                if (self::$cron_logger !== null) {
+                    $hook = self::get_task_hook($task_name);
+                    self::$cron_logger->start_log($hook, $task_name);
+                    self::$cron_logger->end_log($hook, 'skipped', 'Dependencies not satisfied');
+                }
+            }
         });
+
+        return true;
+    }
+
+    /**
+     * Check if dependencies for a task are satisfied.
+     *
+     * @since    1.4.0
+     * @access   private
+     * @param    string    $task_name    The name of the task.
+     * @return   bool                    Whether the dependencies are satisfied.
+     */
+    private static function check_dependencies($task_name) {
+        // If no dependencies, return true
+        if (!isset(self::$dependencies[$task_name]) || empty(self::$dependencies[$task_name])) {
+            return true;
+        }
+
+        // Check each dependency
+        foreach (self::$dependencies[$task_name] as $dependency) {
+            // Skip if dependency doesn't exist
+            if (!isset(self::$tasks[$dependency])) {
+                error_log(sprintf('Status Sentry: Dependency "%s" for task "%s" not found in registry', $dependency, $task_name));
+                continue;
+            }
+
+            // Get the hook for the dependency
+            $hook = self::$tasks[$dependency]['hook'];
+
+            // Check if the dependency has been run recently
+            global $wpdb;
+            $cron_logs_table = $wpdb->prefix . 'status_sentry_cron_logs';
+
+            // Skip if the table doesn't exist yet
+            if ($wpdb->get_var("SHOW TABLES LIKE '$cron_logs_table'") != $cron_logs_table) {
+                continue;
+            }
+
+            // Check for successful completion in the last 24 hours
+            $recent_success = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM $cron_logs_table WHERE hook = %s AND status = 'complete' AND completion_time > %s",
+                $hook,
+                date('Y-m-d H:i:s', time() - 86400) // Last 24 hours
+            ));
+
+            if ($recent_success == 0) {
+                error_log(sprintf('Status Sentry: Dependency "%s" for task "%s" has not completed successfully in the last 24 hours', $dependency, $task_name));
+                return false;
+            }
+        }
 
         return true;
     }
@@ -403,10 +507,79 @@ class Status_Sentry_Scheduler {
         // Register custom cron schedules
         add_filter('cron_schedules', [self::class, 'add_cron_schedules']);
 
+        // Get schedule intervals for offset calculation
+        $schedule_intervals = [];
+        $wp_schedules = wp_get_schedules();
+        foreach ($wp_schedules as $name => $schedule) {
+            $schedule_intervals[$name] = $schedule['interval'];
+        }
+
         // Schedule all registered tasks
         foreach (self::$tasks as $task_name => $task) {
-            // Add random offset to prevent all tasks from running at the same time
-            $offset = mt_rand(0, 60); // Random offset between 0 and 60 seconds
+            // Calculate offset based on task tier and schedule interval
+            $interval = isset($schedule_intervals[$task['schedule']]) ? $schedule_intervals[$task['schedule']] : 3600;
+            $max_offset_percent = 0.25; // Maximum offset is 25% of the interval
+
+            // Adjust max offset based on tier
+            switch ($task['tier']) {
+                case 'critical':
+                    $max_offset_percent = 0.05; // 5% for critical tasks
+                    break;
+                case 'standard':
+                    $max_offset_percent = 0.15; // 15% for standard tasks
+                    break;
+                case 'intensive':
+                    $max_offset_percent = 0.25; // 25% for intensive tasks
+                    break;
+                case 'report':
+                    $max_offset_percent = 0.35; // 35% for report tasks
+                    break;
+            }
+
+            // Calculate max offset in seconds
+            $max_offset = (int)($interval * $max_offset_percent);
+
+            // Generate random offset between 0 and max_offset
+            $offset = mt_rand(0, $max_offset);
+
+            // Add load-aware delay if system is under high load
+            if (self::$resource_manager !== null && method_exists(self::$resource_manager, 'get_system_load')) {
+                $load = self::$resource_manager->get_system_load();
+                $cpu_threshold = self::$resource_manager->get_cpu_threshold();
+
+                // Use the CPU threshold from resource manager instead of hardcoded value
+                if ($load > $cpu_threshold) {
+                    // Add additional delay proportional to the load
+                    $load_factor = ($load - $cpu_threshold) / (1 - $cpu_threshold); // Normalize to 0-1 range
+                    $load_delay = (int)($max_offset * $load_factor * 5); // Increased scale factor for more aggressive throttling
+
+                    // Apply different delay strategies based on task tier
+                    switch ($task['tier']) {
+                        case 'critical':
+                            // Critical tasks get minimal delay
+                            $load_delay = (int)($load_delay * 0.5);
+                            break;
+                        case 'intensive':
+                            // Intensive tasks get maximum delay
+                            $load_delay = (int)($load_delay * 1.5);
+                            break;
+                        case 'report':
+                            // Report tasks get even more delay
+                            $load_delay = (int)($load_delay * 2.0);
+                            break;
+                    }
+
+                    $offset += $load_delay;
+                    error_log(sprintf(
+                        'Status Sentry: Adding load-aware delay of %d seconds for task "%s" (load: %.2f, threshold: %.2f, tier: %s)',
+                        $load_delay,
+                        $task_name,
+                        $load,
+                        $cpu_threshold,
+                        $task['tier']
+                    ));
+                }
+            }
 
             if (!wp_next_scheduled($task['hook'])) {
                 $result = wp_schedule_event(time() + $offset, $task['schedule'], $task['hook']);
@@ -414,11 +587,26 @@ class Status_Sentry_Scheduler {
                     error_log(sprintf('Status Sentry: Failed to schedule task "%s"', $task_name));
                     $success = false;
                 } else {
-                    error_log(sprintf('Status Sentry: Successfully scheduled task "%s" (every %s)', $task_name, $task['schedule']));
+                    error_log(sprintf('Status Sentry: Successfully scheduled task "%s" (every %s) with offset of %d seconds', $task_name, $task['schedule'], $offset));
                 }
             } else {
                 error_log(sprintf('Status Sentry: Task "%s" already scheduled', $task_name));
             }
+        }
+
+        // Register recovery task hook
+        add_action('status_sentry_recover_task', [self::$health_checker, 'recover_task'], 10, 2);
+
+        // Schedule health check task if not already scheduled
+        if (!wp_next_scheduled('status_sentry_cron_health_check')) {
+            wp_schedule_event(time() + 300, 'thirty_minutes', 'status_sentry_cron_health_check');
+            error_log('Status Sentry: Scheduled cron health check task');
+        }
+
+        // Schedule cron logs cleanup if not already scheduled
+        if (!wp_next_scheduled('status_sentry_cleanup_cron_logs')) {
+            wp_schedule_event(time() + 3600, 'daily', 'status_sentry_cleanup_cron_logs');
+            error_log('Status Sentry: Scheduled cron logs cleanup task');
         }
 
         // Verify that the tasks were scheduled
@@ -534,6 +722,12 @@ class Status_Sentry_Scheduler {
             'display' => __('Every 30 Minutes', 'status-sentry-wp'),
         ];
 
+        // Add a twice-daily schedule
+        $schedules['twice_daily'] = [
+            'interval' => 43200, // 12 hours in seconds
+            'display' => __('Twice Daily', 'status-sentry-wp'),
+        ];
+
         // Add a weekly schedule
         $schedules['weekly'] = [
             'interval' => 604800, // 7 days in seconds
@@ -541,6 +735,28 @@ class Status_Sentry_Scheduler {
         ];
 
         return $schedules;
+    }
+
+    /**
+     * Get the hook for a task.
+     *
+     * @since    1.4.0
+     * @param    string    $task_name    The name of the task.
+     * @return   string|null             The hook for the task, or null if the task doesn't exist.
+     */
+    public static function get_task_hook($task_name) {
+        return isset(self::$tasks[$task_name]) ? self::$tasks[$task_name]['hook'] : null;
+    }
+
+    /**
+     * Get the dependencies for a task.
+     *
+     * @since    1.4.0
+     * @param    string    $task_name    The name of the task.
+     * @return   array                   The dependencies for the task, or an empty array if none.
+     */
+    public static function get_task_dependencies($task_name) {
+        return isset(self::$dependencies[$task_name]) ? self::$dependencies[$task_name] : [];
     }
 
     /**

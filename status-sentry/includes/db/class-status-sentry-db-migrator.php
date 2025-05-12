@@ -230,6 +230,14 @@ class Status_Sentry_DB_Migrator {
             $migrations[7] = $this->migrations_dir . '007_add_composite_indexes.php';
         }
 
+        // Add hardcoded migrations for 1.4.0
+        if (!isset($migrations[8])) {
+            $migrations[8] = $this->migrations_dir . '008_create_monitoring_events_table.php';
+        }
+        if (!isset($migrations[9])) {
+            $migrations[9] = $this->migrations_dir . '009_create_cron_logs_table.php';
+        }
+
         return $migrations;
     }
 

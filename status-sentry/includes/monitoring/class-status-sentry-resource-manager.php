@@ -24,6 +24,24 @@
  * - Provide adaptive resource allocation
  * - Implement the Monitoring_Interface for centralized monitoring
  *
+ * Memory Management:
+ * - Default memory budgets are set per tier (critical: 10MB, standard: 20MB, intensive: 50MB, report: 100MB)
+ * - Garbage collection is triggered when memory usage exceeds 80% of PHP memory_limit
+ * - GC is forced after specific tasks like 'cleanup' and 'process_queue'
+ * - Multiple GC cycles (default: 3) are run to maximize memory recovery
+ *
+ * CPU Load Monitoring:
+ * - Default CPU threshold is 70% (0.7)
+ * - System load combines CPU, memory, and database activity metrics
+ * - Tasks are aborted when system is overloaded
+ * - Scheduler adds delays proportional to system load
+ *
+ * Configuration:
+ * - All settings can be modified via WordPress filters:
+ *   - 'status_sentry_resource_budgets' - Modify memory/time/query budgets per tier
+ *   - 'status_sentry_gc_settings' - Modify garbage collection behavior
+ *   - 'status_sentry_cpu_threshold' - Change the CPU load threshold
+ *
  * @since      1.1.0
  * @package    Status_Sentry
  * @subpackage Status_Sentry/includes/monitoring
@@ -385,6 +403,54 @@ class Status_Sentry_Resource_Manager implements Status_Sentry_Monitoring_Interfa
         }
 
         return false;
+    }
+
+    /**
+     * Get the CPU threshold.
+     *
+     * @since    1.5.0
+     * @return   float    The CPU threshold (0-1).
+     */
+    public function get_cpu_threshold() {
+        return $this->cpu_threshold;
+    }
+
+    /**
+     * Get the current system load.
+     *
+     * This method returns a normalized system load value between 0 and 1,
+     * taking into account CPU load, memory usage, and database activity.
+     *
+     * @since    1.4.0
+     * @return   float    The current system load as a value between 0 and 1.
+     */
+    public function get_system_load() {
+        // Start with a base load of 0
+        $load = 0;
+
+        // Add CPU load component (weight: 40%)
+        $cpu_load = $this->get_cpu_load();
+        if ($cpu_load !== false) {
+            // Cap CPU load at 1.0 for calculation purposes
+            $cpu_load = min(1.0, $cpu_load);
+            $load += $cpu_load * 0.4;
+        }
+
+        // Add memory usage component (weight: 40%)
+        $memory_limit = $this->get_memory_limit_in_bytes();
+        $memory_usage = memory_get_usage();
+        $memory_usage_percent = ($memory_usage / $memory_limit);
+        $load += $memory_usage_percent * 0.4;
+
+        // Add database activity component (weight: 20%)
+        if ($this->is_high_traffic()) {
+            $load += 0.2;
+        }
+
+        // Ensure the load is between 0 and 1
+        $load = max(0, min(1, $load));
+
+        return $load;
     }
 
     /**

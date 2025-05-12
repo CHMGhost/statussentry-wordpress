@@ -86,6 +86,8 @@ class Status_Sentry {
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-resource-manager.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-task-state-manager.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-conflict-detector.php';
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-cron-logger.php';
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-health-checker.php';
 
         // Scheduler
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/class-status-sentry-scheduler.php';
@@ -174,6 +176,14 @@ class Status_Sentry {
         // Register task state manager component
         $task_state_manager = new Status_Sentry_Task_State_Manager();
         $this->monitoring_manager->register_component('task_state_manager', $task_state_manager);
+
+        // Register cron logger component
+        $cron_logger = new Status_Sentry_Cron_Logger();
+        $this->monitoring_manager->register_component('cron_logger', $cron_logger);
+
+        // Register health checker component
+        $health_checker = new Status_Sentry_Health_Checker();
+        $this->monitoring_manager->register_component('health_checker', $health_checker);
 
         // Add monitoring event hook for the scheduler
         add_action('status_sentry_before_task_execution', [$this, 'emit_task_start_event'], 10, 2);

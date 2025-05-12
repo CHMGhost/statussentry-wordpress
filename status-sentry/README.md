@@ -336,7 +336,37 @@ This plugin is licensed under the GPL v2 or later. See [LICENSE](LICENSE) for de
 
 Developed by the Status Sentry Team.
 
+## Core Framework
+
+Status Sentry includes a robust core framework that provides the foundation for all monitoring capabilities. The framework includes:
+
+- **Hook Management System**: Define and register WordPress hooks for monitoring
+- **Data Capture Pipeline**: Capture, filter, sample, and queue events
+- **Event Processing**: Process events from the queue and store them in the database
+- **Database Schema Management**: Manage database schema through migrations
+- **Scheduler**: Schedule and execute background tasks
+
+For more information on the core framework, see [CORE-FRAMEWORK.md](docs/CORE-FRAMEWORK.md).
+
 ## Changelog
+
+### 1.3.0 (2023-08-15)
+- Added centralized monitoring system with standardized event structure
+- Implemented monitoring interfaces for consistent component integration
+- Added monitoring manager for centralized event handling
+- Enhanced conflict detection with improved plugin activation monitoring
+- Added resource manager for better memory and performance tracking
+- Implemented task state persistence for resumable processing
+- Added monitoring events table for unified event storage
+
+### 1.2.0 (2023-07-15)
+- Added task state management for resumable processing
+- Implemented query cache for improved performance
+- Added composite indexes for better query performance
+- Enhanced scheduler with tiered task execution
+- Improved resource monitoring and management
+- Added garbage collection for better memory management
+- Enhanced database cleanup with better retention policies
 
 ### 1.1.0 (2023-06-15)
 - Enhanced error handling throughout the data pipeline

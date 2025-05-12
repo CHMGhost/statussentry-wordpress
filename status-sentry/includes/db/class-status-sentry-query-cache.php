@@ -36,6 +36,15 @@ class Status_Sentry_Query_Cache {
     private $table_name;
 
     /**
+     * Default TTL for cache entries in seconds.
+     *
+     * @since    1.5.0
+     * @access   private
+     * @var      int    $default_ttl    Default TTL for cache entries in seconds.
+     */
+    private $default_ttl;
+
+    /**
      * Initialize the class and set its properties.
      *
      * @since    1.2.0
@@ -43,6 +52,9 @@ class Status_Sentry_Query_Cache {
     public function __construct() {
         global $wpdb;
         $this->table_name = $wpdb->prefix . 'status_sentry_query_cache';
+
+        // Set default TTL (1 hour) and allow it to be filtered
+        $this->default_ttl = apply_filters('status_sentry_query_cache_default_ttl', 3600);
     }
 
     /**
@@ -92,10 +104,17 @@ class Status_Sentry_Query_Cache {
      * @param    string    $key      The cache key.
      * @param    mixed     $value    The value to cache.
      * @param    string    $group    Optional. The cache group. Default 'default'.
-     * @param    int       $ttl      Optional. Time to live in seconds. Default 3600 (1 hour).
+     * @param    int       $ttl      Optional. Time to live in seconds. Default uses the filtered default TTL.
      * @return   bool                Whether the value was successfully cached.
      */
-    public function set($key, $value, $group = 'default', $ttl = 3600) {
+    public function set($key, $value, $group = 'default', $ttl = null) {
+        // Use default TTL if not specified
+        if ($ttl === null) {
+            $ttl = $this->default_ttl;
+        }
+
+        // Apply per-group TTL filter if available
+        $ttl = apply_filters('status_sentry_query_cache_ttl', $ttl, $group);
         global $wpdb;
 
         // Ensure the table exists
