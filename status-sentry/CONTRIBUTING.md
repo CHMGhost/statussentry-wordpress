@@ -81,6 +81,20 @@ Before submitting a pull request, please run the tests to ensure your changes do
 composer run test
 ```
 
+The plugin includes several test suites:
+
+1. **Core Framework Tests**: Test the core framework components (hooks, data pipeline, etc.)
+2. **Performance Benchmark Tests**: Test the performance of key operations against defined targets
+3. **Plugin Compatibility Tests**: Test compatibility with popular WordPress plugins
+
+When adding new features, please add appropriate tests:
+
+- Add unit tests for new classes and methods
+- Add performance benchmark tests for performance-critical operations
+- Add plugin compatibility tests if your changes might affect compatibility with other plugins
+
+All test files should be added to the `tests` directory and included in `run-tests.php`.
+
 ## Documentation
 
 Documentation is a crucial part of this project. Please update the documentation when you make changes to the code.

@@ -43,6 +43,8 @@ Status Sentry WP is built with a modular, extensible architecture that follows W
 * **Resource Monitoring**: Automatic adjustment based on memory usage and execution time
 * **Error Recovery**: Graceful handling of failures with detailed diagnostics
 * **Optimized Performance**: Caching and batching for efficient operation
+* **Performance Benchmarking**: Comprehensive benchmarking with defined targets for memory usage and execution time
+* **Plugin Compatibility**: Tested compatibility with popular WordPress plugins
 
 = Use Cases =
 
@@ -173,5 +175,15 @@ add_filter('status_sentry_process_event', function($data, $feature, $hook) {
     return $data;
 }, 10, 3);
 ```
+
+= Comprehensive Documentation =
+
+The plugin includes detailed documentation to help you understand and extend its functionality:
+
+* **Core Framework**: See `docs/CORE-FRAMEWORK.md` for details on the core framework components
+* **Resource Management**: See `docs/RESOURCE-MANAGEMENT.md` for information on resource management features
+* **Performance Benchmarking**: See `docs/PERFORMANCE-BENCHMARKING.md` for guidance on performance benchmarking
+* **Production Hardening**: See `docs/PRODUCTION-HARDENING.md` for best practices on hardening the plugin for production
+* **Getting Started with Extensions**: See `docs/GETTING-STARTED-EXTENDING.md` for a quick guide to extending the plugin
 
 For more information, please see the [full documentation](https://github.com/status-sentry/status-sentry-wp).

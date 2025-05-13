@@ -12,3 +12,5 @@ require_once dirname(__DIR__) . '/wp-load.php';
 
 // Run the tests
 require_once __DIR__ . '/tests/test-core-framework.php';
+require_once __DIR__ . '/tests/test-performance-benchmark.php';
+require_once __DIR__ . '/tests/test-plugin-compatibility.php';
