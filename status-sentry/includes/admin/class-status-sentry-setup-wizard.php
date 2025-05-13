@@ -75,6 +75,13 @@ class Status_Sentry_Setup_Wizard {
 
         error_log('Status Sentry Setup Wizard: Nonce verified successfully');
 
+        // Check if quick setup was requested
+        if (isset($_POST['quick_setup'])) {
+            error_log('Status Sentry Setup Wizard: Quick setup requested');
+            $this->quick_setup();
+            return;
+        }
+
         // Check for the hidden step field
         $submitted_step = isset($_POST['status_sentry_setup_step']) ? intval($_POST['status_sentry_setup_step']) : 0;
         error_log('Status Sentry Setup Wizard: Submitted step from form: ' . $submitted_step);
@@ -217,6 +224,37 @@ class Status_Sentry_Setup_Wizard {
     private function complete_setup() {
         // Mark setup as complete
         update_option('status_sentry_setup_complete', true);
+    }
+
+    /**
+     * Perform quick setup with balanced preset.
+     *
+     * This method applies the balanced preset and marks setup as complete,
+     * allowing users to skip the full setup wizard.
+     *
+     * @since    1.5.0
+     */
+    public function quick_setup() {
+        // Get the output buffer instance
+        $buffer = \Status_Sentry_Output_Buffer::get_instance();
+
+        error_log('Status Sentry Setup Wizard: Performing quick setup with balanced preset');
+
+        // Apply the balanced preset
+        $config_manager = Status_Sentry_Config_Manager::get_instance();
+        $config_manager->apply_preset('balanced');
+
+        // Save the preset selection
+        update_option('status_sentry_preset', 'balanced');
+
+        // Mark setup as complete
+        $this->complete_setup();
+
+        // Redirect to the dashboard
+        error_log('Status Sentry Setup Wizard: Quick setup complete, redirecting to dashboard');
+        $buffer->end();
+        wp_redirect(admin_url('admin.php?page=status-sentry'));
+        exit;
     }
 
     /**
@@ -488,13 +526,59 @@ class Status_Sentry_Setup_Wizard {
             <p><?php echo esc_html__('Let\'s get started by configuring the basic settings for your site.', 'status-sentry-wp'); ?></p>
         </div>
 
-        <form method="post" action="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup')); ?>">
-            <?php wp_nonce_field('status_sentry_setup', 'status_sentry_setup_nonce'); ?>
-            <input type="hidden" name="status_sentry_setup_step" value="1">
-            <div class="setup-actions">
-                <button type="submit" class="button button-primary"><?php echo esc_html__('Let\'s Go!', 'status-sentry-wp'); ?></button>
+        <div class="setup-options">
+            <div class="setup-option">
+                <h3><?php echo esc_html__('Custom Setup', 'status-sentry-wp'); ?></h3>
+                <p><?php echo esc_html__('Walk through the setup wizard to customize all monitoring settings.', 'status-sentry-wp'); ?></p>
+                <form method="post" action="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup')); ?>">
+                    <?php wp_nonce_field('status_sentry_setup', 'status_sentry_setup_nonce'); ?>
+                    <input type="hidden" name="status_sentry_setup_step" value="1">
+                    <div class="setup-actions">
+                        <button type="submit" class="button button-primary"><?php echo esc_html__('Let\'s Go!', 'status-sentry-wp'); ?></button>
+                    </div>
+                </form>
             </div>
-        </form>
+
+            <div class="setup-option">
+                <h3><?php echo esc_html__('Quick Setup', 'status-sentry-wp'); ?></h3>
+                <p><?php echo esc_html__('Apply recommended balanced settings and start monitoring immediately.', 'status-sentry-wp'); ?></p>
+                <form method="post" action="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup')); ?>">
+                    <?php wp_nonce_field('status_sentry_setup', 'status_sentry_setup_nonce'); ?>
+                    <input type="hidden" name="quick_setup" value="1">
+                    <div class="setup-actions">
+                        <button type="submit" class="button button-secondary"><?php echo esc_html__('Monitor My Site (Quick Setup)', 'status-sentry-wp'); ?></button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <style>
+            .setup-options {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 20px;
+                margin-top: 30px;
+            }
+            .setup-option {
+                flex: 1 1 45%;
+                min-width: 250px;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                padding: 20px;
+                background: #f9f9f9;
+            }
+            .setup-option h3 {
+                margin-top: 0;
+                margin-bottom: 10px;
+            }
+            .setup-option p {
+                margin-bottom: 20px;
+            }
+            .setup-option .setup-actions {
+                text-align: center;
+                margin-top: 20px;
+            }
+        </style>
         <?php
     }
 
@@ -512,7 +596,7 @@ class Status_Sentry_Setup_Wizard {
 
             <form method="post" action="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup')); ?>">
                 <?php wp_nonce_field('status_sentry_setup', 'status_sentry_setup_nonce'); ?>
-                <input type="hidden" name="status_sentry_setup_step" value="2">
+                <input type="hidden" name="status_sentry_setup_step" value="3">
 
                 <div class="feature-option">
                     <label>
@@ -547,7 +631,7 @@ class Status_Sentry_Setup_Wizard {
                 </div>
 
                 <div class="setup-actions">
-                    <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup&step=1')); ?>" class="button"><?php echo esc_html__('Back', 'status-sentry-wp'); ?></a>
+                    <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup&step=2')); ?>" class="button"><?php echo esc_html__('Back', 'status-sentry-wp'); ?></a>
                     <button type="submit" class="button button-primary"><?php echo esc_html__('Continue', 'status-sentry-wp'); ?></button>
                 </div>
             </form>
@@ -569,7 +653,7 @@ class Status_Sentry_Setup_Wizard {
 
             <form method="post" action="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup')); ?>">
                 <?php wp_nonce_field('status_sentry_setup', 'status_sentry_setup_nonce'); ?>
-                <input type="hidden" name="status_sentry_setup_step" value="3">
+                <input type="hidden" name="status_sentry_setup_step" value="4">
 
                 <table class="form-table">
                     <tr>
@@ -606,7 +690,7 @@ class Status_Sentry_Setup_Wizard {
                 </table>
 
                 <div class="setup-actions">
-                    <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup&step=2')); ?>" class="button"><?php echo esc_html__('Back', 'status-sentry-wp'); ?></a>
+                    <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup&step=3')); ?>" class="button"><?php echo esc_html__('Back', 'status-sentry-wp'); ?></a>
                     <button type="submit" class="button button-primary"><?php echo esc_html__('Continue', 'status-sentry-wp'); ?></button>
                 </div>
             </form>

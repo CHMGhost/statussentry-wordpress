@@ -19,11 +19,23 @@
 class Status_Sentry_Admin {
 
     /**
+     * Setup wizard instance.
+     *
+     * @since    1.5.0
+     * @access   private
+     * @var      Status_Sentry_Setup_Wizard    $setup_wizard    The setup wizard instance.
+     */
+    private $setup_wizard;
+
+    /**
      * Initialize the class.
      *
      * @since    1.0.0
      */
     public function init() {
+        // Ensure the setup wizard form handler is registered before admin_init
+        $this->setup_wizard = new Status_Sentry_Setup_Wizard();
+
         // Add admin menu
         add_action('admin_menu', [$this, 'add_admin_menu']);
 
@@ -690,11 +702,15 @@ class Status_Sentry_Admin {
             exit;
         }
 
-        // Create setup wizard instance
-        $setup_wizard = new Status_Sentry_Setup_Wizard();
+        // Use the existing setup wizard instance that was created in init()
+        // This ensures the same instance that registered the process_form hook is used
+        if (!isset($this->setup_wizard)) {
+            error_log('Status Sentry Admin: Setup wizard instance not found, creating new instance');
+            $this->setup_wizard = new Status_Sentry_Setup_Wizard();
+        }
 
         // Render the wizard
-        $setup_wizard->render();
+        $this->setup_wizard->render();
     }
 
     /**
