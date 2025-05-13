@@ -19,7 +19,9 @@ These targets represent the maximum acceptable memory usage and execution time f
 
 ## Running Benchmarks
 
-To run the performance benchmarks, use the following command:
+### Standard Benchmarks
+
+To run the standard performance benchmarks, use the following command:
 
 ```bash
 php status-sentry/run-tests.php
@@ -27,7 +29,17 @@ php status-sentry/run-tests.php
 
 This will execute all tests, including the performance benchmarks defined in `tests/test-performance-benchmark.php`.
 
-### Sample Output
+### Comparative Benchmarks
+
+To compare performance across different configurations, use the comparative benchmark script:
+
+```bash
+php status-sentry/tests/test-performance-comparison.php
+```
+
+This script runs benchmarks with multiple configurations and generates a comparison table showing the impact of different settings on performance.
+
+### Sample Standard Benchmark Output
 
 ```
 Running performance benchmark tests...
@@ -48,6 +60,36 @@ Query Cache get() performance:
   Execution time: 0.1234 ms (target: 10 ms) - PASSED
 
 Performance benchmark results: 3/3 tests passed.
+```
+
+### Sample Comparative Benchmark Output
+
+```
+Performance Comparison Results
+=============================
+
+| Operation | Metric | Default | High Performance | Low Memory | Balanced |
+|-----------|--------|------------|------------|------------|------------|
+| Resource Manager should_continue() | Memory (MB) | 0.0123 | 0.0098 | 0.0087 | 0.0105 |
+| Resource Manager should_continue() | Time (ms) | 0.0456 | 0.0412 | 0.0478 | 0.0432 |
+| Event Processor process_events() | Memory (MB) | 3.4567 | 3.1245 | 2.8976 | 3.2134 |
+| Event Processor process_events() | Time (ms) | 123.4567 | 98.7654 | 145.6789 | 110.3456 |
+| Event Queue enqueue() | Memory (MB) | 0.2345 | 0.2123 | 0.1987 | 0.2234 |
+| Event Queue enqueue() | Time (ms) | 1.2345 | 1.0123 | 1.3456 | 1.1234 |
+| Query Cache set() | Memory (MB) | 0.1234 | 0.1345 | N/A | 0.1289 |
+| Query Cache set() | Time (ms) | 0.2345 | 0.1987 | N/A | 0.2123 |
+| Query Cache get() | Memory (MB) | 0.0123 | 0.0134 | N/A | 0.0129 |
+| Query Cache get() | Time (ms) | 0.1234 | 0.0987 | N/A | 0.1123 |
+| Data Capture capture() | Memory (MB) | 0.3456 | 0.3123 | 0.2987 | 0.3234 |
+| Data Capture capture() | Time (ms) | 2.3456 | 2.0123 | 2.5678 | 2.1234 |
+
+Summary
+-------
+
+Default: 6/6 tests passed
+High Performance: 6/6 tests passed
+Low Memory: 4/4 tests passed
+Balanced: 6/6 tests passed
 ```
 
 ## Interpreting Results
@@ -122,9 +164,53 @@ Consider integrating performance benchmarks into your continuous integration (CI
 2. Comparing results against previous runs
 3. Failing the build if performance degrades significantly
 
+## Creating Custom Benchmark Configurations
+
+You can create custom configurations for comparative benchmarking by modifying the `$test_configurations` array in `tests/test-performance-comparison.php`. Each configuration should include:
+
+- `label`: A short name for the configuration
+- `description`: A longer description of the configuration
+- `settings`: An array of plugin settings to apply during benchmarking
+
+Example of adding a new configuration:
+
+```php
+$test_configurations['custom_config'] = [
+    'label' => 'Custom Config',
+    'description' => 'My custom configuration for testing',
+    'settings' => [
+        'db_batch_size' => 150,
+        'memory_threshold' => 75,
+        'gc_cycles' => 4,
+        'cpu_threshold' => 65,
+        'enable_query_cache' => 1,
+        'query_cache_ttl' => 5400,
+        'enable_resumable_tasks' => 1
+    ]
+];
+```
+
+The available settings that can be modified include:
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| db_batch_size | Number of items to process in a single database operation | 100 |
+| memory_threshold | Percentage of memory limit at which garbage collection is triggered | 80 |
+| gc_cycles | Number of garbage collection cycles to run when triggered | 3 |
+| cpu_threshold | Percentage of CPU load at which tasks are delayed | 70 |
+| enable_query_cache | Whether to cache frequent database queries | 1 (enabled) |
+| query_cache_ttl | Time to live for cached queries in seconds | 3600 |
+| enable_resumable_tasks | Whether to allow long-running tasks to be resumed | 1 (enabled) |
+| events_retention_days | Number of days to keep events in the database | 30 |
+| processed_queue_retention_days | Number of days to keep processed queue items | 7 |
+| failed_queue_retention_days | Number of days to keep failed queue items | 14 |
+| task_runs_retention_days | Number of days to keep task run history | 30 |
+
 ## References
 
 - [Status Sentry Performance Benchmark Test](../tests/test-performance-benchmark.php)
+- [Status Sentry Comparative Benchmark Test](../tests/test-performance-comparison.php)
+- [Status Sentry Benchmark Runner](../includes/benchmarking/class-status-sentry-benchmark-runner.php)
 - [Status Sentry Run Tests Script](../run-tests.php)
 - [PHP Memory Management](https://www.php.net/manual/en/features.gc.php)
 - [WordPress Performance Best Practices](https://developer.wordpress.org/plugins/performance/)

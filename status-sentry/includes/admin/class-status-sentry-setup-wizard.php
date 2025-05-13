@@ -95,19 +95,34 @@ class Status_Sentry_Setup_Wizard {
                 break;
 
             case 2:
-                // Feature selection step
-                error_log('Status Sentry Setup Wizard: Processing step 2, saving features and redirecting to step 3');
-                $this->save_feature_settings();
-                // End output buffer before redirect
-                $buffer->end();
-                wp_redirect(admin_url('admin.php?page=status-sentry-setup&step=3'));
+                // Preset selection step
+                error_log('Status Sentry Setup Wizard: Processing step 2, saving preset selection');
+                $preset = isset($_POST['status_sentry_preset']) ? sanitize_text_field($_POST['status_sentry_preset']) : 'balanced';
+
+                // Save the selected preset
+                update_option('status_sentry_preset', $preset);
+
+                // Apply the preset configuration
+                $config_manager = Status_Sentry_Config_Manager::get_instance();
+                $config_manager->apply_preset($preset);
+
+                // If custom preset is selected, go to features step, otherwise skip to completion
+                if ($preset === 'custom') {
+                    error_log('Status Sentry Setup Wizard: Custom preset selected, redirecting to features step');
+                    $buffer->end();
+                    wp_redirect(admin_url('admin.php?page=status-sentry-setup&step=3'));
+                } else {
+                    error_log('Status Sentry Setup Wizard: Preset ' . $preset . ' selected, redirecting to completion step');
+                    $buffer->end();
+                    wp_redirect(admin_url('admin.php?page=status-sentry-setup&step=5'));
+                }
                 exit;
                 break;
 
             case 3:
-                // Retention settings step
-                error_log('Status Sentry Setup Wizard: Processing step 3, saving retention settings and redirecting to step 4');
-                $this->save_retention_settings();
+                // Feature selection step
+                error_log('Status Sentry Setup Wizard: Processing step 3, saving features and redirecting to step 4');
+                $this->save_feature_settings();
                 // End output buffer before redirect
                 $buffer->end();
                 wp_redirect(admin_url('admin.php?page=status-sentry-setup&step=4'));
@@ -115,8 +130,22 @@ class Status_Sentry_Setup_Wizard {
                 break;
 
             case 4:
+                // Retention settings step
+                error_log('Status Sentry Setup Wizard: Processing step 4, saving retention settings and redirecting to step 5');
+                $this->save_retention_settings();
+
+                // Mark as custom preset
+                update_option('status_sentry_preset', 'custom');
+
+                // End output buffer before redirect
+                $buffer->end();
+                wp_redirect(admin_url('admin.php?page=status-sentry-setup&step=5'));
+                exit;
+                break;
+
+            case 5:
                 // Final step - complete setup
-                error_log('Status Sentry Setup Wizard: Processing step 4, completing setup and redirecting to dashboard');
+                error_log('Status Sentry Setup Wizard: Processing step 5, completing setup and redirecting to dashboard');
                 $this->complete_setup();
                 // End output buffer before redirect
                 $buffer->end();
@@ -208,12 +237,15 @@ class Status_Sentry_Setup_Wizard {
                 $this->render_welcome_step();
                 break;
             case 2:
-                $this->render_features_step($settings);
+                $this->render_presets_step();
                 break;
             case 3:
-                $this->render_retention_step($settings);
+                $this->render_features_step($settings);
                 break;
             case 4:
+                $this->render_retention_step($settings);
+                break;
+            case 5:
                 $this->render_complete_step($settings);
                 break;
             default:
@@ -223,6 +255,118 @@ class Status_Sentry_Setup_Wizard {
 
         // Render footer
         $this->render_footer();
+    }
+
+    /**
+     * Render the presets step.
+     *
+     * @since    1.5.0
+     */
+    private function render_presets_step() {
+        // Get the current preset
+        $current_preset = get_option('status_sentry_preset', 'balanced');
+
+        ?>
+        <div class="setup-section">
+            <h2><?php echo esc_html__('Choose Monitoring Preset', 'status-sentry-wp'); ?></h2>
+            <p><?php echo esc_html__('Select a monitoring preset that best fits your site\'s needs. You can customize these settings later.', 'status-sentry-wp'); ?></p>
+
+            <form method="post" action="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup')); ?>">
+                <?php wp_nonce_field('status_sentry_setup', 'status_sentry_setup_nonce'); ?>
+                <input type="hidden" name="status_sentry_setup_step" value="2">
+
+                <div class="preset-options">
+                    <div class="preset-option">
+                        <label>
+                            <input type="radio" name="status_sentry_preset" value="basic" <?php checked($current_preset, 'basic'); ?>>
+                            <strong><?php echo esc_html__('Basic', 'status-sentry-wp'); ?></strong>
+                        </label>
+                        <p><?php echo esc_html__('Minimal monitoring with low resource usage. Best for small sites or shared hosting.', 'status-sentry-wp'); ?></p>
+                        <ul>
+                            <li><?php echo esc_html__('Core monitoring enabled', 'status-sentry-wp'); ?></li>
+                            <li><?php echo esc_html__('Conflict detection enabled', 'status-sentry-wp'); ?></li>
+                            <li><?php echo esc_html__('7-day data retention', 'status-sentry-wp'); ?></li>
+                            <li><?php echo esc_html__('Minimal resource usage', 'status-sentry-wp'); ?></li>
+                        </ul>
+                    </div>
+
+                    <div class="preset-option">
+                        <label>
+                            <input type="radio" name="status_sentry_preset" value="balanced" <?php checked($current_preset, 'balanced'); ?>>
+                            <strong><?php echo esc_html__('Balanced (Recommended)', 'status-sentry-wp'); ?></strong>
+                        </label>
+                        <p><?php echo esc_html__('Comprehensive monitoring with moderate resource usage. Suitable for most sites.', 'status-sentry-wp'); ?></p>
+                        <ul>
+                            <li><?php echo esc_html__('All monitoring features enabled', 'status-sentry-wp'); ?></li>
+                            <li><?php echo esc_html__('14-30 day data retention', 'status-sentry-wp'); ?></li>
+                            <li><?php echo esc_html__('Resource management enabled', 'status-sentry-wp'); ?></li>
+                            <li><?php echo esc_html__('Query caching enabled', 'status-sentry-wp'); ?></li>
+                        </ul>
+                    </div>
+
+                    <div class="preset-option">
+                        <label>
+                            <input type="radio" name="status_sentry_preset" value="comprehensive" <?php checked($current_preset, 'comprehensive'); ?>>
+                            <strong><?php echo esc_html__('Comprehensive', 'status-sentry-wp'); ?></strong>
+                        </label>
+                        <p><?php echo esc_html__('Maximum monitoring with higher resource usage. Best for larger sites with dedicated hosting.', 'status-sentry-wp'); ?></p>
+                        <ul>
+                            <li><?php echo esc_html__('All monitoring features enabled', 'status-sentry-wp'); ?></li>
+                            <li><?php echo esc_html__('30-90 day data retention', 'status-sentry-wp'); ?></li>
+                            <li><?php echo esc_html__('Advanced resource management', 'status-sentry-wp'); ?></li>
+                            <li><?php echo esc_html__('More frequent health checks', 'status-sentry-wp'); ?></li>
+                        </ul>
+                    </div>
+
+                    <div class="preset-option">
+                        <label>
+                            <input type="radio" name="status_sentry_preset" value="custom" <?php checked($current_preset, 'custom'); ?>>
+                            <strong><?php echo esc_html__('Custom', 'status-sentry-wp'); ?></strong>
+                        </label>
+                        <p><?php echo esc_html__('Manually configure all monitoring settings to your exact specifications.', 'status-sentry-wp'); ?></p>
+                    </div>
+                </div>
+
+                <div class="setup-actions">
+                    <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup&step=1')); ?>" class="button"><?php echo esc_html__('Back', 'status-sentry-wp'); ?></a>
+                    <button type="submit" class="button button-primary"><?php echo esc_html__('Continue', 'status-sentry-wp'); ?></button>
+                </div>
+            </form>
+        </div>
+
+        <style>
+            .preset-options {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 20px;
+                margin-top: 20px;
+            }
+            .preset-option {
+                flex: 1 1 45%;
+                min-width: 250px;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                padding: 15px;
+                background: #f9f9f9;
+            }
+            .preset-option label {
+                font-size: 16px;
+                display: block;
+                margin-bottom: 10px;
+            }
+            .preset-option p {
+                margin-top: 5px;
+                margin-bottom: 10px;
+            }
+            .preset-option ul {
+                margin-left: 20px;
+                list-style-type: disc;
+            }
+            .preset-option input[type="radio"] {
+                margin-right: 8px;
+            }
+        </style>
+        <?php
     }
 
     /**
@@ -238,9 +382,10 @@ class Status_Sentry_Setup_Wizard {
             <div class="status-sentry-setup-steps">
                 <ul class="step-indicator">
                     <li class="<?php echo $this->step >= 1 ? 'active' : ''; ?>"><?php echo esc_html__('Welcome', 'status-sentry-wp'); ?></li>
-                    <li class="<?php echo $this->step >= 2 ? 'active' : ''; ?>"><?php echo esc_html__('Features', 'status-sentry-wp'); ?></li>
-                    <li class="<?php echo $this->step >= 3 ? 'active' : ''; ?>"><?php echo esc_html__('Retention', 'status-sentry-wp'); ?></li>
-                    <li class="<?php echo $this->step >= 4 ? 'active' : ''; ?>"><?php echo esc_html__('Complete', 'status-sentry-wp'); ?></li>
+                    <li class="<?php echo $this->step >= 2 ? 'active' : ''; ?>"><?php echo esc_html__('Presets', 'status-sentry-wp'); ?></li>
+                    <li class="<?php echo $this->step >= 3 ? 'active' : ''; ?>"><?php echo esc_html__('Features', 'status-sentry-wp'); ?></li>
+                    <li class="<?php echo $this->step >= 4 ? 'active' : ''; ?>"><?php echo esc_html__('Retention', 'status-sentry-wp'); ?></li>
+                    <li class="<?php echo $this->step >= 5 ? 'active' : ''; ?>"><?php echo esc_html__('Complete', 'status-sentry-wp'); ?></li>
                 </ul>
             </div>
 
@@ -476,6 +621,16 @@ class Status_Sentry_Setup_Wizard {
      * @param    array    $settings    The current settings.
      */
     private function render_complete_step($settings) {
+        // Get the selected preset
+        $preset = get_option('status_sentry_preset', 'balanced');
+        $preset_names = [
+            'basic' => __('Basic', 'status-sentry-wp'),
+            'balanced' => __('Balanced', 'status-sentry-wp'),
+            'comprehensive' => __('Comprehensive', 'status-sentry-wp'),
+            'custom' => __('Custom', 'status-sentry-wp'),
+        ];
+        $preset_name = isset($preset_names[$preset]) ? $preset_names[$preset] : $preset_names['balanced'];
+
         ?>
         <div class="setup-section">
             <h2><?php echo esc_html__('Setup Complete!', 'status-sentry-wp'); ?></h2>
@@ -483,41 +638,52 @@ class Status_Sentry_Setup_Wizard {
 
             <h3><?php echo esc_html__('Summary of Your Settings', 'status-sentry-wp'); ?></h3>
 
-            <h4><?php echo esc_html__('Enabled Features', 'status-sentry-wp'); ?></h4>
-            <ul>
-                <?php if ($settings['core_monitoring']) : ?>
-                    <li><?php echo esc_html__('Core Monitoring', 'status-sentry-wp'); ?></li>
-                <?php endif; ?>
+            <h4><?php echo esc_html__('Selected Preset', 'status-sentry-wp'); ?></h4>
+            <p><strong><?php echo esc_html($preset_name); ?></strong></p>
 
-                <?php if ($settings['db_monitoring']) : ?>
-                    <li><?php echo esc_html__('Database Monitoring', 'status-sentry-wp'); ?></li>
-                <?php endif; ?>
+            <?php if ($preset === 'custom') : ?>
+                <h4><?php echo esc_html__('Enabled Features', 'status-sentry-wp'); ?></h4>
+                <ul>
+                    <?php if ($settings['core_monitoring']) : ?>
+                        <li><?php echo esc_html__('Core Monitoring', 'status-sentry-wp'); ?></li>
+                    <?php endif; ?>
 
-                <?php if ($settings['conflict_detection']) : ?>
-                    <li><?php echo esc_html__('Conflict Detection', 'status-sentry-wp'); ?></li>
-                <?php endif; ?>
+                    <?php if ($settings['db_monitoring']) : ?>
+                        <li><?php echo esc_html__('Database Monitoring', 'status-sentry-wp'); ?></li>
+                    <?php endif; ?>
 
-                <?php if ($settings['performance_monitoring']) : ?>
-                    <li><?php echo esc_html__('Performance Monitoring', 'status-sentry-wp'); ?></li>
-                <?php endif; ?>
-            </ul>
+                    <?php if ($settings['conflict_detection']) : ?>
+                        <li><?php echo esc_html__('Conflict Detection', 'status-sentry-wp'); ?></li>
+                    <?php endif; ?>
 
-            <h4><?php echo esc_html__('Data Retention', 'status-sentry-wp'); ?></h4>
-            <ul>
-                <li><?php echo esc_html(sprintf(__('Events: %d days', 'status-sentry-wp'), $settings['events_retention_days'])); ?></li>
-                <li><?php echo esc_html(sprintf(__('Processed Queue: %d days', 'status-sentry-wp'), $settings['processed_queue_retention_days'])); ?></li>
-                <li><?php echo esc_html(sprintf(__('Failed Queue: %d days', 'status-sentry-wp'), $settings['failed_queue_retention_days'])); ?></li>
-                <li><?php echo esc_html(sprintf(__('Task Runs: %d days', 'status-sentry-wp'), $settings['task_runs_retention_days'])); ?></li>
-            </ul>
+                    <?php if ($settings['performance_monitoring']) : ?>
+                        <li><?php echo esc_html__('Performance Monitoring', 'status-sentry-wp'); ?></li>
+                    <?php endif; ?>
+                </ul>
+
+                <h4><?php echo esc_html__('Data Retention', 'status-sentry-wp'); ?></h4>
+                <ul>
+                    <li><?php echo esc_html(sprintf(__('Events: %d days', 'status-sentry-wp'), $settings['events_retention_days'])); ?></li>
+                    <li><?php echo esc_html(sprintf(__('Processed Queue: %d days', 'status-sentry-wp'), $settings['processed_queue_retention_days'])); ?></li>
+                    <li><?php echo esc_html(sprintf(__('Failed Queue: %d days', 'status-sentry-wp'), $settings['failed_queue_retention_days'])); ?></li>
+                    <li><?php echo esc_html(sprintf(__('Task Runs: %d days', 'status-sentry-wp'), $settings['task_runs_retention_days'])); ?></li>
+                </ul>
+            <?php else : ?>
+                <p><?php echo esc_html__('The selected preset has been applied with optimized settings for your site.', 'status-sentry-wp'); ?></p>
+            <?php endif; ?>
 
             <p><?php echo esc_html__('You can change these settings at any time from the Status Sentry Settings page.', 'status-sentry-wp'); ?></p>
 
             <form method="post" action="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup')); ?>">
                 <?php wp_nonce_field('status_sentry_setup', 'status_sentry_setup_nonce'); ?>
-                <input type="hidden" name="status_sentry_setup_step" value="4">
+                <input type="hidden" name="status_sentry_setup_step" value="5">
 
                 <div class="setup-actions">
-                    <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup&step=3')); ?>" class="button"><?php echo esc_html__('Back', 'status-sentry-wp'); ?></a>
+                    <?php if ($preset === 'custom') : ?>
+                        <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup&step=4')); ?>" class="button"><?php echo esc_html__('Back', 'status-sentry-wp'); ?></a>
+                    <?php else : ?>
+                        <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup&step=2')); ?>" class="button"><?php echo esc_html__('Back', 'status-sentry-wp'); ?></a>
+                    <?php endif; ?>
                     <button type="submit" class="button button-primary"><?php echo esc_html__('Finish Setup', 'status-sentry-wp'); ?></button>
                 </div>
             </form>

@@ -90,6 +90,7 @@ class Status_Sentry {
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-conflict-detector.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-cron-logger.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-health-checker.php';
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/monitoring/class-status-sentry-config-manager.php';
 
         // Scheduler
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/class-status-sentry-scheduler.php';
@@ -160,16 +161,34 @@ class Status_Sentry {
         // Get the monitoring manager instance
         $this->monitoring_manager = Status_Sentry_Monitoring_Manager::get_instance();
 
-        // Register monitoring components
+        // Get the config manager instance
+        $config_manager = Status_Sentry_Config_Manager::get_instance();
+
+        // Get the selected preset configuration
+        $preset_key = $config_manager->get_selected_preset();
+        $preset_config = $config_manager->get_preset_config($preset_key);
+
+        // Initialize and register monitoring components with preset configurations
+
+        // Register conflict detector component
         $conflict_detector = new Status_Sentry_Conflict_Detector();
+        if (isset($preset_config['conflict_detector'])) {
+            $conflict_detector->update_config($preset_config['conflict_detector']);
+        }
         $this->monitoring_manager->register_component('conflict_detector', $conflict_detector);
 
         // Register self-monitor component
         $self_monitor = new Status_Sentry_Self_Monitor();
+        if (isset($preset_config['self_monitor'])) {
+            $self_monitor->update_config($preset_config['self_monitor']);
+        }
         $this->monitoring_manager->register_component('self_monitor', $self_monitor);
 
         // Register resource manager component
         $resource_manager = new Status_Sentry_Resource_Manager();
+        if (isset($preset_config['resource_manager'])) {
+            $resource_manager->update_config($preset_config['resource_manager']);
+        }
         $this->monitoring_manager->register_component('resource_manager', $resource_manager);
 
         // Register baseline component
@@ -178,14 +197,23 @@ class Status_Sentry {
 
         // Register task state manager component
         $task_state_manager = new Status_Sentry_Task_State_Manager();
+        if (isset($preset_config['task_state_manager'])) {
+            $task_state_manager->update_config($preset_config['task_state_manager']);
+        }
         $this->monitoring_manager->register_component('task_state_manager', $task_state_manager);
 
         // Register cron logger component
         $cron_logger = new Status_Sentry_Cron_Logger();
+        if (isset($preset_config['cron_logger'])) {
+            $cron_logger->update_config($preset_config['cron_logger']);
+        }
         $this->monitoring_manager->register_component('cron_logger', $cron_logger);
 
         // Register health checker component
         $health_checker = new Status_Sentry_Health_Checker();
+        if (isset($preset_config['health_checker'])) {
+            $health_checker->update_config($preset_config['health_checker']);
+        }
         $this->monitoring_manager->register_component('health_checker', $health_checker);
 
         // Add monitoring event hook for the scheduler

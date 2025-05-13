@@ -121,7 +121,7 @@ spl_autoload_register(function (string $class_name) {
     }
 
     // Check in subdirectories
-    $directories = ['hooks', 'data', 'db', 'admin', 'monitoring'];
+    $directories = ['hooks', 'data', 'db', 'admin', 'monitoring', 'benchmarking'];
     foreach ($directories as $dir) {
         $file = STATUS_SENTRY_PLUGIN_DIR . 'includes/' . $dir . '/class-' . $class_file . '.php';
         if (file_exists($file)) {

@@ -248,32 +248,56 @@ class Status_Sentry_Admin {
 
         // Handle form submission
         if (isset($_POST['status_sentry_settings_nonce']) && wp_verify_nonce($_POST['status_sentry_settings_nonce'], 'status_sentry_settings')) {
-            // Update feature settings
-            $settings['core_monitoring'] = isset($_POST['core_monitoring']) ? 1 : 0;
-            $settings['db_monitoring'] = isset($_POST['db_monitoring']) ? 1 : 0;
-            $settings['conflict_detection'] = isset($_POST['conflict_detection']) ? 1 : 0;
-            $settings['performance_monitoring'] = isset($_POST['performance_monitoring']) ? 1 : 0;
 
-            // Update performance settings
-            $settings['db_batch_size'] = isset($_POST['db_batch_size']) ? max(10, min(500, intval($_POST['db_batch_size']))) : 100;
-            $settings['memory_threshold'] = isset($_POST['memory_threshold']) ? max(50, min(95, intval($_POST['memory_threshold']))) : 80;
-            $settings['gc_cycles'] = isset($_POST['gc_cycles']) ? max(1, min(10, intval($_POST['gc_cycles']))) : 3;
-            $settings['cpu_threshold'] = isset($_POST['cpu_threshold']) ? max(30, min(90, intval($_POST['cpu_threshold']))) : 70;
-            $settings['enable_query_cache'] = isset($_POST['enable_query_cache']) ? 1 : 0;
-            $settings['query_cache_ttl'] = isset($_POST['query_cache_ttl']) ? max(300, min(86400, intval($_POST['query_cache_ttl']))) : 3600;
-            $settings['enable_resumable_tasks'] = isset($_POST['enable_resumable_tasks']) ? 1 : 0;
+            // Check if a preset was selected
+            if (isset($_POST['status_sentry_preset'])) {
+                $preset = sanitize_text_field($_POST['status_sentry_preset']);
 
-            // Update retention settings
-            $settings['events_retention_days'] = isset($_POST['events_retention_days']) ? max(1, min(365, intval($_POST['events_retention_days']))) : 30;
-            $settings['processed_queue_retention_days'] = isset($_POST['processed_queue_retention_days']) ? max(1, min(30, intval($_POST['processed_queue_retention_days']))) : 7;
-            $settings['failed_queue_retention_days'] = isset($_POST['failed_queue_retention_days']) ? max(1, min(90, intval($_POST['failed_queue_retention_days']))) : 14;
-            $settings['task_runs_retention_days'] = isset($_POST['task_runs_retention_days']) ? max(1, min(90, intval($_POST['task_runs_retention_days']))) : 30;
+                // If a non-custom preset was selected, apply it
+                if ($preset !== 'custom') {
+                    // Get the config manager instance
+                    $config_manager = Status_Sentry_Config_Manager::get_instance();
 
-            // Save settings
-            update_option('status_sentry_settings', $settings);
+                    // Apply the preset configuration
+                    $config_manager->apply_preset($preset);
 
-            // Show success message
-            echo '<div class="notice notice-success"><p>' . esc_html__('Settings saved.', 'status-sentry-wp') . '</p></div>';
+                    // Show success message
+                    echo '<div class="notice notice-success"><p>' . esc_html__('Preset applied successfully.', 'status-sentry-wp') . '</p></div>';
+
+                    // Refresh settings from options
+                    $settings = $this->get_settings();
+                } else {
+                    // Update feature settings
+                    $settings['core_monitoring'] = isset($_POST['core_monitoring']) ? 1 : 0;
+                    $settings['db_monitoring'] = isset($_POST['db_monitoring']) ? 1 : 0;
+                    $settings['conflict_detection'] = isset($_POST['conflict_detection']) ? 1 : 0;
+                    $settings['performance_monitoring'] = isset($_POST['performance_monitoring']) ? 1 : 0;
+
+                    // Update performance settings
+                    $settings['db_batch_size'] = isset($_POST['db_batch_size']) ? max(10, min(500, intval($_POST['db_batch_size']))) : 100;
+                    $settings['memory_threshold'] = isset($_POST['memory_threshold']) ? max(50, min(95, intval($_POST['memory_threshold']))) : 80;
+                    $settings['gc_cycles'] = isset($_POST['gc_cycles']) ? max(1, min(10, intval($_POST['gc_cycles']))) : 3;
+                    $settings['cpu_threshold'] = isset($_POST['cpu_threshold']) ? max(30, min(90, intval($_POST['cpu_threshold']))) : 70;
+                    $settings['enable_query_cache'] = isset($_POST['enable_query_cache']) ? 1 : 0;
+                    $settings['query_cache_ttl'] = isset($_POST['query_cache_ttl']) ? max(300, min(86400, intval($_POST['query_cache_ttl']))) : 3600;
+                    $settings['enable_resumable_tasks'] = isset($_POST['enable_resumable_tasks']) ? 1 : 0;
+
+                    // Update retention settings
+                    $settings['events_retention_days'] = isset($_POST['events_retention_days']) ? max(1, min(365, intval($_POST['events_retention_days']))) : 30;
+                    $settings['processed_queue_retention_days'] = isset($_POST['processed_queue_retention_days']) ? max(1, min(30, intval($_POST['processed_queue_retention_days']))) : 7;
+                    $settings['failed_queue_retention_days'] = isset($_POST['failed_queue_retention_days']) ? max(1, min(90, intval($_POST['failed_queue_retention_days']))) : 14;
+                    $settings['task_runs_retention_days'] = isset($_POST['task_runs_retention_days']) ? max(1, min(90, intval($_POST['task_runs_retention_days']))) : 30;
+
+                    // Save settings
+                    update_option('status_sentry_settings', $settings);
+
+                    // Set preset to custom
+                    update_option('status_sentry_preset', 'custom');
+
+                    // Show success message
+                    echo '<div class="notice notice-success"><p>' . esc_html__('Custom settings saved.', 'status-sentry-wp') . '</p></div>';
+                }
+            }
         }
 
         // Render the settings form
@@ -289,6 +313,48 @@ class Status_Sentry_Admin {
 
             <form method="post" action="">
                 <?php wp_nonce_field('status_sentry_settings', 'status_sentry_settings_nonce'); ?>
+
+                <?php
+                // Get the current preset
+                $current_preset = get_option('status_sentry_preset', 'balanced');
+                ?>
+
+                <div class="status-sentry-preset-selector">
+                    <h2><?php echo esc_html__('Configuration Preset', 'status-sentry-wp'); ?></h2>
+                    <p><?php echo esc_html__('Choose a preset configuration or customize settings manually.', 'status-sentry-wp'); ?></p>
+
+                    <div class="preset-options">
+                        <label>
+                            <input type="radio" name="status_sentry_preset" value="basic" <?php checked($current_preset, 'basic'); ?>>
+                            <strong><?php echo esc_html__('Basic', 'status-sentry-wp'); ?></strong>
+                        </label>
+                        <p class="description"><?php echo esc_html__('Minimal monitoring with low resource usage. Best for small sites or shared hosting.', 'status-sentry-wp'); ?></p>
+
+                        <label>
+                            <input type="radio" name="status_sentry_preset" value="balanced" <?php checked($current_preset, 'balanced'); ?>>
+                            <strong><?php echo esc_html__('Balanced', 'status-sentry-wp'); ?></strong>
+                        </label>
+                        <p class="description"><?php echo esc_html__('Comprehensive monitoring with moderate resource usage. Suitable for most sites.', 'status-sentry-wp'); ?></p>
+
+                        <label>
+                            <input type="radio" name="status_sentry_preset" value="comprehensive" <?php checked($current_preset, 'comprehensive'); ?>>
+                            <strong><?php echo esc_html__('Comprehensive', 'status-sentry-wp'); ?></strong>
+                        </label>
+                        <p class="description"><?php echo esc_html__('Maximum monitoring with higher resource usage. Best for larger sites with dedicated hosting.', 'status-sentry-wp'); ?></p>
+
+                        <label>
+                            <input type="radio" name="status_sentry_preset" value="custom" <?php checked($current_preset, 'custom'); ?>>
+                            <strong><?php echo esc_html__('Custom', 'status-sentry-wp'); ?></strong>
+                        </label>
+                        <p class="description"><?php echo esc_html__('Manually configure all monitoring settings to your exact specifications.', 'status-sentry-wp'); ?></p>
+                    </div>
+
+                    <p>
+                        <input type="submit" name="apply_preset" class="button button-secondary" value="<?php echo esc_attr__('Apply Preset', 'status-sentry-wp'); ?>">
+                    </p>
+                </div>
+
+                <hr>
 
                 <h2 class="nav-tab-wrapper">
                     <a href="#features" class="nav-tab nav-tab-active"><?php echo esc_html__('Features', 'status-sentry-wp'); ?></a>
@@ -461,8 +527,46 @@ class Status_Sentry_Admin {
                         // Add active class to the clicked tab
                         $(this).addClass('nav-tab-active');
                     });
+
+                    // Preset selector
+                    $('input[name="status_sentry_preset"]').on('change', function() {
+                        if ($(this).val() === 'custom') {
+                            $('.nav-tab-wrapper, .tab-content').show();
+                        } else {
+                            // If a preset is selected, you might want to hide the detailed settings
+                            // Uncomment the line below to hide the tabs when a preset is selected
+                            // $('.nav-tab-wrapper, .tab-content').hide();
+                        }
+                    });
                 });
                 </script>
+
+                <style>
+                .status-sentry-preset-selector {
+                    background: #fff;
+                    border: 1px solid #ccd0d4;
+                    padding: 15px;
+                    margin-bottom: 20px;
+                }
+                .status-sentry-preset-selector h2 {
+                    margin-top: 0;
+                }
+                .preset-options {
+                    margin: 15px 0;
+                }
+                .preset-options label {
+                    display: block;
+                    margin: 10px 0 5px;
+                    font-weight: 600;
+                }
+                .preset-options input[type="radio"] {
+                    margin-right: 8px;
+                }
+                .preset-options .description {
+                    margin: 0 0 15px 24px;
+                    color: #646970;
+                }
+                </style>
 
                 <?php submit_button(); ?>
             </form>
