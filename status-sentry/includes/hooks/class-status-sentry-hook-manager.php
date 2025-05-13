@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * Hook manager class.
  *
@@ -88,7 +90,7 @@ class Status_Sentry_Hook_Manager {
      * @since    1.0.0
      * @return   void
      */
-    public function register_hooks() {
+    public function register_hooks(): void {
         foreach ($this->hook_config->get_hooks() as $feature => $hooks) {
             // Skip if feature is not enabled
             if (!$this->hook_config->is_feature_enabled($feature)) {
@@ -126,7 +128,7 @@ class Status_Sentry_Hook_Manager {
      *                                 - sampling_rate: Rate from 0.0 to 1.0 (default: 1.0)
      * @return   void
      */
-    private function register_hook($feature, $hook, $config) {
+    private function register_hook(string $feature, string $hook, array $config): void {
         $callback = [$this, $config['callback']];
         $priority = isset($config['priority']) ? $config['priority'] : 10;
         $args = isset($config['args']) ? $config['args'] : 1;
@@ -137,7 +139,8 @@ class Status_Sentry_Hook_Manager {
             // Check if this event should be sampled
             $sampling_rate = isset($config['sampling_rate']) ? $config['sampling_rate'] : 1.0;
             if (!$this->sampling_manager->should_sample($feature, $hook, $sampling_rate)) {
-                return $args[0] ?? null;
+                // Return the original first argument if it exists, or an empty string to avoid null
+                return isset($args[0]) ? $args[0] : '';
             }
 
             // Call the actual callback

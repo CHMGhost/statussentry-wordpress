@@ -37,5 +37,8 @@ class Status_Sentry_Activator {
 
         // Set version in options
         update_option('status_sentry_version', STATUS_SENTRY_VERSION);
+
+        // Set setup flag to indicate setup wizard needs to be run
+        add_option('status_sentry_setup_complete', false);
     }
 }

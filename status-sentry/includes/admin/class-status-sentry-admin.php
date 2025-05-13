@@ -32,6 +32,30 @@ class Status_Sentry_Admin {
 
         // Add dashboard widget
         add_action('wp_dashboard_setup', [$this, 'add_dashboard_widget']);
+
+        // Check if setup wizard needs to be run
+        add_action('admin_init', [$this, 'maybe_redirect_to_setup_wizard']);
+    }
+
+    /**
+     * Check if setup wizard needs to be run and redirect if necessary.
+     *
+     * @since    1.4.0
+     */
+    public function maybe_redirect_to_setup_wizard() {
+        // Skip redirect if the skip_setup flag is present
+        if (isset($_GET['skip_setup'])) {
+            return;
+        }
+
+        // Only redirect if setup is not complete, user has permissions, and we're not already on the setup page
+        if (!get_option('status_sentry_setup_complete') &&
+            current_user_can('manage_options') &&
+            (!isset($_GET['page']) || $_GET['page'] !== 'status-sentry-setup')) {
+
+            wp_redirect(admin_url('admin.php?page=status-sentry-setup'));
+            exit;
+        }
     }
 
     /**
@@ -79,6 +103,16 @@ class Status_Sentry_Admin {
             'manage_options',
             'status-sentry-events',
             [$this, 'render_events_page']
+        );
+
+        // Add setup wizard submenu (hidden from menu)
+        add_submenu_page(
+            null, // No parent menu
+            __('Setup Wizard', 'status-sentry-wp'),
+            __('Setup Wizard', 'status-sentry-wp'),
+            'manage_options',
+            'status-sentry-setup',
+            [$this, 'render_setup_wizard_page']
         );
     }
 
@@ -246,6 +280,12 @@ class Status_Sentry_Admin {
         ?>
         <div class="wrap">
             <h1><?php echo esc_html__('Status Sentry Settings', 'status-sentry-wp'); ?></h1>
+
+            <p>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup&step=1')); ?>" class="button">
+                    <?php echo esc_html__('Re-run Setup Wizard', 'status-sentry-wp'); ?>
+                </a>
+            </p>
 
             <form method="post" action="">
                 <?php wp_nonce_field('status_sentry_settings', 'status_sentry_settings_nonce'); ?>
@@ -525,6 +565,32 @@ class Status_Sentry_Admin {
             </p>
         </div>
         <?php
+    }
+
+    /**
+     * Render setup wizard page.
+     *
+     * @since    1.4.0
+     */
+    public function render_setup_wizard_page() {
+        // Debug: Log setup wizard page render
+        error_log('Status Sentry Admin: Rendering setup wizard page');
+        error_log('GET data: ' . print_r($_GET, true));
+        error_log('POST data: ' . print_r($_POST, true));
+
+        // Handle skip setup action
+        if (isset($_GET['skip_setup'])) {
+            error_log('Status Sentry Admin: Skipping setup wizard');
+            update_option('status_sentry_setup_complete', true);
+            wp_redirect(admin_url('admin.php?page=status-sentry'));
+            exit;
+        }
+
+        // Create setup wizard instance
+        $setup_wizard = new Status_Sentry_Setup_Wizard();
+
+        // Render the wizard
+        $setup_wizard->render();
     }
 
     /**

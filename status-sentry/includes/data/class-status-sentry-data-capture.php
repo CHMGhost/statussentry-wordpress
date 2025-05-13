@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * Data capture class.
  *
@@ -54,13 +56,13 @@ class Status_Sentry_Data_Capture {
      * @param    string    $hook       The name of the WordPress hook.
      * @param    array     $data       The data to capture.
      */
-    public function capture($feature, $hook, $data) {
+    public function capture(string $feature, string $hook, array $data): void {
         // Add metadata
         $data = $this->add_metadata($data, $feature, $hook);
-        
+
         // Filter the data
         $filtered_data = $this->data_filter->filter($data, $feature, $hook);
-        
+
         // Queue the event
         $this->event_queue->enqueue($filtered_data, $feature, $hook);
     }
@@ -75,7 +77,7 @@ class Status_Sentry_Data_Capture {
      * @param    string    $hook       The name of the WordPress hook.
      * @return   array                 The data with metadata.
      */
-    private function add_metadata($data, $feature, $hook) {
+    private function add_metadata(array $data, string $feature, string $hook): array {
         // Add basic metadata
         $data['_meta'] = [
             'feature' => $feature,
@@ -95,7 +97,7 @@ class Status_Sentry_Data_Capture {
             'is_cron' => defined('DOING_CRON') && DOING_CRON,
             'is_rest' => defined('REST_REQUEST') && REST_REQUEST,
         ];
-        
+
         return $data;
     }
 
@@ -106,9 +108,9 @@ class Status_Sentry_Data_Capture {
      * @access   private
      * @return   array    The current user's roles.
      */
-    private function get_current_user_roles() {
+    private function get_current_user_roles(): array {
         $user = wp_get_current_user();
-        
+
         return $user->exists() ? $user->roles : [];
     }
 }

@@ -26,6 +26,8 @@ services:
     volumes:
       - ./wordpress:/var/www/html
       - ./status-sentry:/var/www/html/wp-content/plugins/status-sentry
+      - ./wordpress/wp-content/mu-plugins:/var/www/html/wp-content/mu-plugins
+      - ./docker/php.ini:/usr/local/etc/php/conf.d/custom.ini
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_USER: ${MYSQL_USER:-wordpress}

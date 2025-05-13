@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * Status Sentry WP - Advanced WordPress Monitoring Plugin
  *
@@ -100,7 +102,7 @@ require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/class-status-sentry.php';
  *
  * @since 1.0.0
  */
-spl_autoload_register(function ($class_name) {
+spl_autoload_register(function (string $class_name) {
     // Check if the class should be loaded by this autoloader
     if (strpos($class_name, 'Status_Sentry_') !== 0) {
         return;
@@ -130,6 +132,15 @@ spl_autoload_register(function ($class_name) {
 });
 
 /**
+ * Load the output buffer class.
+ *
+ * This class is used to capture and handle output before headers are sent.
+ *
+ * @since 1.5.0
+ */
+require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/class-status-sentry-output-buffer.php';
+
+/**
  * Begins execution of the plugin.
  *
  * This function initializes the plugin by creating an instance of the main
@@ -140,8 +151,27 @@ spl_autoload_register(function ($class_name) {
  * @see Status_Sentry::run()
  */
 function run_status_sentry() {
-    $plugin = new Status_Sentry();
-    $plugin->run();
+    // Start output buffering to prevent warnings from being output before headers
+    $buffer = Status_Sentry_Output_Buffer::get_instance();
+    $buffer->start();
+
+    try {
+        $plugin = new Status_Sentry();
+        $plugin->run();
+    } catch (Exception $e) {
+        error_log('Status Sentry: Error running plugin - ' . $e->getMessage());
+    }
+
+    // End output buffering after plugin initialization
+    // Use an earlier hook to ensure output buffer is ended before redirects
+    add_action('admin_init', function() use ($buffer) {
+        $buffer->end();
+    }, 1); // Priority 1 to run early
+
+    // Also end on wp_loaded as a fallback
+    add_action('wp_loaded', function() use ($buffer) {
+        $buffer->end();
+    });
 }
 
 // Run the plugin

@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * Monitoring Manager Class
  *
@@ -106,7 +108,7 @@ class Status_Sentry_Monitoring_Manager {
     private function __construct() {
         global $wpdb;
         $this->table_name = $wpdb->prefix . 'status_sentry_monitoring_events';
-        
+
         // Initialize circuit breakers
         $this->circuit_breakers = [
             'global' => [
@@ -116,7 +118,7 @@ class Status_Sentry_Monitoring_Manager {
                 'reset_after' => 300, // 5 minutes
             ],
         ];
-        
+
         // Initialize throttles
         $this->throttles = [
             'global' => [
@@ -126,7 +128,7 @@ class Status_Sentry_Monitoring_Manager {
                 'limit' => 1000, // 1000 events per minute
             ],
         ];
-        
+
         // Ensure the events table exists
         $this->ensure_table_exists();
     }
@@ -146,13 +148,13 @@ class Status_Sentry_Monitoring_Manager {
         }
 
         $this->components[$name] = $component;
-        
+
         // Initialize the component
         $component->init();
-        
+
         // Register the component's handlers
         $component->register_handlers($this);
-        
+
         return true;
     }
 
@@ -181,25 +183,53 @@ class Status_Sentry_Monitoring_Manager {
      * Register an event handler.
      *
      * @since    1.3.0
-     * @param    Status_Sentry_Monitoring_Handler_Interface    $handler    The handler instance.
-     * @return   bool                                                      Whether the handler was successfully registered.
+     * @param    mixed     $handler    The handler instance or event type.
+     * @param    mixed     $callback   Optional. The callback if $handler is an event type.
+     * @return   bool                  Whether the handler was successfully registered.
      */
-    public function register_handler($handler) {
-        if (!($handler instanceof Status_Sentry_Monitoring_Handler_Interface)) {
-            error_log('Status Sentry: Cannot register handler - must implement Status_Sentry_Monitoring_Handler_Interface');
-            return false;
+    public function register_handler($handler, $callback = null) {
+        // If we're registering a handler instance
+        if ($callback === null) {
+            if (!($handler instanceof Status_Sentry_Monitoring_Handler_Interface)) {
+                error_log('Status Sentry: Cannot register handler - must implement Status_Sentry_Monitoring_Handler_Interface');
+                return false;
+            }
+
+            $priority = $handler->get_priority();
+            $types = $handler->get_handled_types();
+
+            foreach ($types as $type) {
+                if (!isset($this->handlers[$type])) {
+                    $this->handlers[$type] = [];
+                }
+
+                $this->handlers[$type][] = [
+                    'handler' => $handler,
+                    'priority' => $priority,
+                ];
+
+                // Sort handlers by priority (highest first)
+                usort($this->handlers[$type], function($a, $b) {
+                    return $b['priority'] - $a['priority'];
+                });
+            }
+
+            return true;
         }
 
-        $priority = $handler->get_priority();
-        $types = $handler->get_handled_types();
+        // If we're registering a callback for a specific event type
+        if (is_string($handler) && is_callable($callback)) {
+            $type = $handler;
 
-        foreach ($types as $type) {
             if (!isset($this->handlers[$type])) {
                 $this->handlers[$type] = [];
             }
 
+            // Use a default priority of 50 (middle)
+            $priority = 50;
+
             $this->handlers[$type][] = [
-                'handler' => $handler,
+                'callback' => $callback,
                 'priority' => $priority,
             ];
 
@@ -207,9 +237,12 @@ class Status_Sentry_Monitoring_Manager {
             usort($this->handlers[$type], function($a, $b) {
                 return $b['priority'] - $a['priority'];
             });
+
+            return true;
         }
 
-        return true;
+        error_log('Status Sentry: Cannot register handler - invalid parameters');
+        return false;
     }
 
     /**
@@ -219,59 +252,74 @@ class Status_Sentry_Monitoring_Manager {
      * @param    Status_Sentry_Monitoring_Event    $event    The event to dispatch.
      * @return   bool                                        Whether the event was successfully dispatched.
      */
-    public function dispatch($event) {
+    public function dispatch(Status_Sentry_Monitoring_Event $event): bool {
         // Check if monitoring is globally disabled
         if (!$this->is_monitoring_enabled()) {
             return false;
         }
-        
+
         // Check circuit breakers
         if ($this->is_circuit_open('global')) {
             // Log that we're dropping events due to open circuit
             error_log('Status Sentry: Dropping event - global circuit breaker is open');
             return false;
         }
-        
+
         // Check throttling
         if ($this->is_throttled('global')) {
             // Log that we're dropping events due to throttling
             error_log('Status Sentry: Dropping event - global throttle limit reached');
             return false;
         }
-        
+
         // Increment throttle counter
         $this->increment_throttle('global');
-        
+
         // Store the event
         $this->store_event($event);
-        
+
         // Get handlers for this event type
         $type = $event->get_type();
         $handlers = $this->handlers[$type] ?? [];
-        
+
         // Track if any handler processed the event
         $handled = false;
-        
+
         // Dispatch to handlers
         foreach ($handlers as $handler_data) {
-            $handler = $handler_data['handler'];
-            
-            // Check if this handler can handle this specific event
-            if ($handler->can_handle($event)) {
+            if (isset($handler_data['handler'])) {
+                $handler = $handler_data['handler'];
+
+                // Check if this handler can handle this specific event
+                if ($handler->can_handle($event)) {
+                    try {
+                        $result = $handler->handle($event);
+                        if ($result) {
+                            $handled = true;
+                        }
+                    } catch (Exception $e) {
+                        error_log('Status Sentry: Error in event handler - ' . $e->getMessage());
+
+                        // If a handler throws an exception, consider tripping the circuit breaker
+                        $this->increment_trip_count('global');
+                    }
+                }
+            } elseif (isset($handler_data['callback'])) {
+                // For callback-based handlers
                 try {
-                    $result = $handler->handle($event);
+                    $result = call_user_func($handler_data['callback'], $event);
                     if ($result) {
                         $handled = true;
                     }
                 } catch (Exception $e) {
-                    error_log('Status Sentry: Error in event handler - ' . $e->getMessage());
-                    
-                    // If a handler throws an exception, consider tripping the circuit breaker
+                    error_log('Status Sentry: Error in event callback - ' . $e->getMessage());
+
+                    // If a callback throws an exception, consider tripping the circuit breaker
                     $this->increment_trip_count('global');
                 }
             }
         }
-        
+
         return $handled;
     }
 
@@ -287,7 +335,7 @@ class Status_Sentry_Monitoring_Manager {
      * @param    int       $priority   Optional. The event priority. Default PRIORITY_NORMAL.
      * @return   bool                  Whether the event was successfully dispatched.
      */
-    public function emit($type, $source, $context, $message, $data = [], $priority = Status_Sentry_Monitoring_Event::PRIORITY_NORMAL) {
+    public function emit(string $type, string $source, string $context, string $message, array $data = [], int $priority = Status_Sentry_Monitoring_Event::PRIORITY_NORMAL): bool {
         $event = new Status_Sentry_Monitoring_Event($type, $source, $context, $message, $data, $priority);
         return $this->dispatch($event);
     }
@@ -300,17 +348,17 @@ class Status_Sentry_Monitoring_Manager {
      * @param    Status_Sentry_Monitoring_Event    $event    The event to store.
      * @return   bool                                        Whether the event was successfully stored.
      */
-    private function store_event($event) {
+    private function store_event(Status_Sentry_Monitoring_Event $event): bool {
         global $wpdb;
-        
+
         // Ensure the table exists
         if (!$this->ensure_table_exists()) {
             return false;
         }
-        
+
         // Convert event to array
         $event_data = $event->to_array();
-        
+
         // Prepare data for database
         $data = [
             'event_id' => $event_data['id'],
@@ -323,7 +371,7 @@ class Status_Sentry_Monitoring_Manager {
             'timestamp' => date('Y-m-d H:i:s', (int)$event_data['timestamp']),
             'created_at' => current_time('mysql'),
         ];
-        
+
         // Insert into database
         $result = $wpdb->insert(
             $this->table_name,
@@ -340,12 +388,12 @@ class Status_Sentry_Monitoring_Manager {
                 '%s', // created_at
             ]
         );
-        
+
         if ($result === false) {
             error_log('Status Sentry: Failed to store monitoring event - ' . $wpdb->last_error);
             return false;
         }
-        
+
         return true;
     }
 
@@ -358,14 +406,14 @@ class Status_Sentry_Monitoring_Manager {
      */
     private function ensure_table_exists() {
         global $wpdb;
-        
+
         if ($wpdb->get_var("SHOW TABLES LIKE '{$this->table_name}'") != $this->table_name) {
             // Table doesn't exist, create it
             require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/db/migrations/008_create_monitoring_events_table.php';
             $migration = new Status_Sentry_Migration_CreateMonitoringEventsTable();
             return $migration->up();
         }
-        
+
         return true;
     }
 
@@ -390,14 +438,14 @@ class Status_Sentry_Monitoring_Manager {
         if (!isset($this->circuit_breakers[$name])) {
             return false;
         }
-        
+
         $breaker = $this->circuit_breakers[$name];
-        
+
         // If the circuit is not tripped, it's closed
         if (!$breaker['tripped']) {
             return false;
         }
-        
+
         // Check if it's time to reset the circuit
         $now = time();
         if ($now - $breaker['last_trip'] > $breaker['reset_after']) {
@@ -405,7 +453,7 @@ class Status_Sentry_Monitoring_Manager {
             $this->reset_circuit($name);
             return false;
         }
-        
+
         return true;
     }
 
@@ -425,11 +473,11 @@ class Status_Sentry_Monitoring_Manager {
                 'reset_after' => 300, // 5 minutes
             ];
         }
-        
+
         $this->circuit_breakers[$name]['tripped'] = true;
         $this->circuit_breakers[$name]['last_trip'] = time();
         $this->circuit_breakers[$name]['trip_count']++;
-        
+
         error_log("Status Sentry: Circuit breaker '{$name}' tripped");
     }
 
@@ -444,9 +492,9 @@ class Status_Sentry_Monitoring_Manager {
         if (!isset($this->circuit_breakers[$name])) {
             return;
         }
-        
+
         $this->circuit_breakers[$name]['tripped'] = false;
-        
+
         error_log("Status Sentry: Circuit breaker '{$name}' reset");
     }
 
@@ -466,9 +514,9 @@ class Status_Sentry_Monitoring_Manager {
                 'reset_after' => 300, // 5 minutes
             ];
         }
-        
+
         $this->circuit_breakers[$name]['trip_count']++;
-        
+
         // Trip the circuit if the count exceeds the threshold
         if ($this->circuit_breakers[$name]['trip_count'] >= 5) {
             $this->trip_circuit($name);
@@ -486,9 +534,9 @@ class Status_Sentry_Monitoring_Manager {
         if (!isset($this->throttles[$name])) {
             return false;
         }
-        
+
         $throttle = $this->throttles[$name];
-        
+
         // Check if we need to reset the window
         $now = time();
         if ($now - $throttle['window_start'] > $throttle['window_size']) {
@@ -497,7 +545,7 @@ class Status_Sentry_Monitoring_Manager {
             $this->throttles[$name]['window_start'] = $now;
             return false;
         }
-        
+
         // Check if we've reached the limit
         return $throttle['count'] >= $throttle['limit'];
     }
@@ -518,7 +566,7 @@ class Status_Sentry_Monitoring_Manager {
                 'limit' => 1000, // 1000 events per minute
             ];
         }
-        
+
         $this->throttles[$name]['count']++;
     }
 }

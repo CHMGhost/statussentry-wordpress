@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * Monitoring Event Class
  *
@@ -130,7 +132,7 @@ class Status_Sentry_Monitoring_Event {
      * @param    array     $data       Optional. The event data. Default empty array.
      * @param    int       $priority   Optional. The event priority. Default PRIORITY_NORMAL.
      */
-    public function __construct($type, $source, $context, $message, $data = [], $priority = self::PRIORITY_NORMAL) {
+    public function __construct(string $type, string $source, string $context, string $message, array $data = [], int $priority = self::PRIORITY_NORMAL) {
         $this->id = $this->generate_id();
         $this->type = $this->validate_type($type);
         $this->priority = $this->validate_priority($priority);
@@ -160,7 +162,7 @@ class Status_Sentry_Monitoring_Event {
      * @param    string    $type    The event type to validate.
      * @return   string             The validated event type.
      */
-    private function validate_type($type) {
+    private function validate_type(string $type): string {
         $valid_types = [
             self::TYPE_INFO,
             self::TYPE_WARNING,
@@ -187,17 +189,17 @@ class Status_Sentry_Monitoring_Event {
      * @param    int    $priority    The event priority to validate.
      * @return   int                 The validated event priority.
      */
-    private function validate_priority($priority) {
+    private function validate_priority(int $priority): int {
         $priority = intval($priority);
-        
+
         if ($priority < 0) {
             return self::PRIORITY_LOW;
         }
-        
+
         if ($priority > 100) {
             return self::PRIORITY_CRITICAL;
         }
-        
+
         return $priority;
     }
 
@@ -316,16 +318,16 @@ class Status_Sentry_Monitoring_Event {
             $data['data'] ?? [],
             $data['priority'] ?? self::PRIORITY_NORMAL
         );
-        
+
         // Override the generated ID and timestamp with the provided values
         if (isset($data['id'])) {
             $event->id = $data['id'];
         }
-        
+
         if (isset($data['timestamp'])) {
             $event->timestamp = $data['timestamp'];
         }
-        
+
         return $event;
     }
 }

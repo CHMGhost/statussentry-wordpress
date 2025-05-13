@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * Hook configuration class.
  *
@@ -113,11 +115,11 @@ class Status_Sentry_Hook_Config {
      * @param    string    $hook        The name of the WordPress hook.
      * @param    array     $config      The hook configuration.
      */
-    private function add_hook($feature, $hook, $config) {
+    private function add_hook(string $feature, string $hook, array $config): void {
         if (!isset($this->hooks[$feature])) {
             $this->hooks[$feature] = [];
         }
-        
+
         $this->hooks[$feature][$hook] = $config;
     }
 
@@ -127,7 +129,7 @@ class Status_Sentry_Hook_Config {
      * @since    1.0.0
      * @return   array    The array of hook definitions.
      */
-    public function get_hooks() {
+    public function get_hooks(): array {
         return $this->hooks;
     }
 
@@ -138,7 +140,7 @@ class Status_Sentry_Hook_Config {
      * @param    string    $feature    The feature to get hooks for.
      * @return   array                 The array of hook definitions for the feature.
      */
-    public function get_feature_hooks($feature) {
+    public function get_feature_hooks(string $feature): array {
         return isset($this->hooks[$feature]) ? $this->hooks[$feature] : [];
     }
 
@@ -149,7 +151,7 @@ class Status_Sentry_Hook_Config {
      * @param    string    $feature    The feature to check.
      * @return   bool                  Whether the feature is enabled.
      */
-    public function is_feature_enabled($feature) {
+    public function is_feature_enabled(string $feature): bool {
         // In a real implementation, this would check options or other configuration
         $enabled_features = [
             'core_monitoring' => true,
@@ -157,7 +159,7 @@ class Status_Sentry_Hook_Config {
             'conflict_detection' => true,
             'performance_monitoring' => true,
         ];
-        
+
         return isset($enabled_features[$feature]) ? $enabled_features[$feature] : false;
     }
 }

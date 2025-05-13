@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * The core plugin class.
  *
@@ -94,6 +96,7 @@ class Status_Sentry {
 
         // Admin
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/admin/class-status-sentry-admin.php';
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/admin/class-status-sentry-setup-wizard.php';
     }
 
     /**
@@ -206,7 +209,7 @@ class Status_Sentry {
      * @param    string    $tier         The tier of the task.
      * @return   void
      */
-    public function emit_task_start_event($task_name, $tier) {
+    public function emit_task_start_event(string $task_name, string $tier): void {
         $this->monitoring_manager->emit(
             Status_Sentry_Monitoring_Event::TYPE_INFO,
             'scheduler',
@@ -231,7 +234,7 @@ class Status_Sentry {
      * @param    array     $execution_data  The execution data.
      * @return   void
      */
-    public function emit_task_end_event($task_name, $tier, $execution_data) {
+    public function emit_task_end_event(string $task_name, string $tier, array $execution_data): void {
         $event_type = Status_Sentry_Monitoring_Event::TYPE_INFO;
         $priority = Status_Sentry_Monitoring_Event::PRIORITY_LOW;
 
@@ -270,7 +273,7 @@ class Status_Sentry {
      * @since    1.3.0
      * @return   void
      */
-    public function emit_health_check_event() {
+    public function emit_health_check_event(): void {
         global $wpdb;
 
         // Collect system information

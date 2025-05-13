@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * Event queue class.
  *
@@ -90,7 +92,7 @@ class Status_Sentry_Event_Queue {
      * @param    string    $hook       The name of the WordPress hook that triggered the event.
      * @return   bool                  Whether the event was successfully enqueued.
      */
-    public function enqueue($data, $feature, $hook) {
+    public function enqueue(array $data, string $feature, string $hook): bool {
         global $wpdb;
 
         // Validate input parameters
@@ -230,7 +232,7 @@ class Status_Sentry_Event_Queue {
      * @return   array                The events as associative arrays.
      * @throws   Exception            If there is an error retrieving events.
      */
-    public function get_events($limit = 100, $status = 'pending') {
+    public function get_events(int $limit = 100, string $status = 'pending'): array {
         global $wpdb;
 
         // Validate input parameters
@@ -310,7 +312,7 @@ class Status_Sentry_Event_Queue {
      * @return   bool                 Whether the status was successfully updated.
      * @throws   Exception            If there is an error updating the status.
      */
-    public function update_event_status($id, $status) {
+    public function update_event_status(int $id, string $status): bool {
         global $wpdb;
 
         // Validate input parameters
@@ -387,7 +389,7 @@ class Status_Sentry_Event_Queue {
      * @return   int                  The number of events deleted.
      * @throws   Exception            If there is an error deleting events.
      */
-    public function delete_events($status = 'processed', $age = 86400) {
+    public function delete_events(string $status = 'processed', int $age = 86400): int {
         global $wpdb;
 
         // Validate input parameters
@@ -462,7 +464,7 @@ class Status_Sentry_Event_Queue {
      * @access   private
      * @return   bool    Whether the table was successfully created.
      */
-    private function create_queue_table() {
+    private function create_queue_table(): bool {
         global $wpdb;
 
         $charset_collate = $wpdb->get_charset_collate();
@@ -496,7 +498,7 @@ class Status_Sentry_Event_Queue {
      * @since    1.0.0
      * @access   private
      */
-    private function maybe_schedule_processing() {
+    private function maybe_schedule_processing(): void {
         global $wpdb;
 
         // Count pending events
