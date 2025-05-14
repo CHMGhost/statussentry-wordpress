@@ -10,9 +10,9 @@
  * @subpackage Status_Sentry/tests
  */
 
-// Define ABSPATH if it doesn't exist (for standalone testing)
-if (!defined('ABSPATH')) {
-    define('ABSPATH', dirname(__DIR__) . '/');
+// Ensure WordPress is loaded
+if (!function_exists('add_filter')) {
+    die('WordPress environment is required for benchmarking. Please run through the WordPress bootstrap.');
 }
 
 // Define the plugin constants if not already defined

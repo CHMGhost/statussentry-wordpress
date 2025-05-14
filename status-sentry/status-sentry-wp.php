@@ -78,6 +78,50 @@ register_activation_hook(__FILE__, 'activate_status_sentry');
 register_deactivation_hook(__FILE__, 'deactivate_status_sentry');
 
 /**
+ * Verify database tables after activation.
+ *
+ * This function checks if the required database tables were created successfully
+ * during plugin activation and logs any issues.
+ *
+ * @since 1.5.0
+ */
+function verify_status_sentry_tables() {
+    global $wpdb;
+
+    // Check if the events table exists
+    $events_table = $wpdb->prefix . 'status_sentry_events';
+    if ($wpdb->get_var("SHOW TABLES LIKE '{$events_table}'") != $events_table) {
+        error_log("Status Sentry: WARNING - Events table {$events_table} does not exist after activation");
+
+        // Try to create the table again
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/db/class-status-sentry-db-migrator.php';
+        $migrator = new Status_Sentry_DB_Migrator();
+        $result = $migrator->run_migrations();
+
+        error_log("Status Sentry: Attempted to run migrations again, result: " . ($result ? 'success' : 'failure'));
+
+        // Check if the table exists now
+        if ($wpdb->get_var("SHOW TABLES LIKE '{$events_table}'") != $events_table) {
+            error_log("Status Sentry: CRITICAL - Events table {$events_table} still does not exist after retry");
+
+            // Add an admin notice
+            add_action('admin_notices', function() {
+                echo '<div class="notice notice-error"><p>';
+                echo esc_html__('Status Sentry: Critical error - Events table could not be created. Please check your database permissions and try deactivating and reactivating the plugin.', 'status-sentry-wp');
+                echo '</p></div>';
+            });
+        } else {
+            error_log("Status Sentry: Events table {$events_table} created successfully on retry");
+        }
+    } else {
+        error_log("Status Sentry: Events table {$events_table} exists");
+    }
+}
+
+// Run table verification after plugin activation
+add_action('admin_init', 'verify_status_sentry_tables');
+
+/**
  * The core plugin class that is used to define internationalization,
  * admin-specific hooks, and public-facing site hooks.
  *
@@ -141,6 +185,24 @@ spl_autoload_register(function (string $class_name) {
 require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/class-status-sentry-output-buffer.php';
 
 /**
+ * Load the dashboard REST API controller.
+ *
+ * This class handles the REST API endpoints for the dashboard.
+ *
+ * @since 1.5.0
+ */
+require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/admin/class-status-sentry-dashboard-controller.php';
+
+/**
+ * Load the benchmark admin page.
+ *
+ * This file adds a benchmark page to the WordPress admin.
+ *
+ * @since 1.6.0
+ */
+require_once STATUS_SENTRY_PLUGIN_DIR . 'admin-benchmark.php';
+
+/**
  * Begins execution of the plugin.
  *
  * This function initializes the plugin by creating an instance of the main
@@ -161,6 +223,19 @@ function run_status_sentry() {
     } catch (Exception $e) {
         error_log('Status Sentry: Error running plugin - ' . $e->getMessage());
     }
+
+    // Register REST API routes
+    add_action('rest_api_init', function() {
+        // Make sure the WP_REST_Controller class is loaded
+        if (!class_exists('WP_REST_Controller')) {
+            require_once ABSPATH . 'wp-includes/rest-api/endpoints/class-wp-rest-controller.php';
+        }
+
+        // Always use the real dashboard controller which has internal error handling
+        $dashboard_controller = new Status_Sentry_Dashboard_Controller();
+        $dashboard_controller->register_routes();
+        error_log('Status Sentry: Dashboard controller routes registered');
+    });
 
     // End output buffering after plugin initialization
     // Use an earlier hook to ensure output buffer is ended before redirects

@@ -98,6 +98,7 @@ class Status_Sentry {
         // Admin
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/admin/class-status-sentry-admin.php';
         require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/admin/class-status-sentry-setup-wizard.php';
+        require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/admin/class-status-sentry-dashboard-settings.php';
     }
 
     /**
@@ -324,5 +325,29 @@ class Status_Sentry {
             $system_info,
             Status_Sentry_Monitoring_Event::PRIORITY_LOW
         );
+
+        // After health check emit, also emit a resource_usage event with CPU data
+        if (class_exists('Status_Sentry_Resource_Manager')) {
+            $resource_manager = Status_Sentry_Resource_Manager::get_instance();
+            $cpu_load = $resource_manager->get_cpu_load();
+
+            if ($cpu_load !== false) {
+                // Create a resource_usage event with CPU data
+                $event = new Status_Sentry_Monitoring_Event(
+                    'resource_usage',
+                    'resource_manager',
+                    'system',
+                    sprintf('Hourly CPU usage: %.2f%%', $cpu_load * 100),
+                    [
+                        'cpu_usage' => $cpu_load,
+                        'timestamp' => microtime(true)
+                    ],
+                    Status_Sentry_Monitoring_Event::PRIORITY_LOW
+                );
+
+                // Dispatch the event
+                $this->monitoring_manager->dispatch($event);
+            }
+        }
     }
 }

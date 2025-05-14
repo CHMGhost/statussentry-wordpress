@@ -11,156 +11,16 @@
  * @since      1.4.0
  */
 
-// Define WordPress functions if they don't exist (for standalone testing)
+// Ensure WordPress is loaded
 if (!function_exists('add_filter')) {
-    function add_filter($tag, $function_to_add, $priority = 10, $accepted_args = 1) {
-        return true;
-    }
+    die('WordPress environment is required for benchmarking. Please run through the WordPress bootstrap.');
 }
 
-if (!function_exists('apply_filters')) {
-    function apply_filters($tag, $value, ...$args) {
-        return $value;
-    }
-}
-
-if (!function_exists('add_action')) {
-    function add_action($tag, $function_to_add, $priority = 10, $accepted_args = 1) {
-        return true;
-    }
-}
-
-if (!function_exists('get_option')) {
-    function get_option($option, $default = false) {
-        return $default;
-    }
-}
-
-if (!function_exists('update_option')) {
-    function update_option($option, $value, $autoload = null) {
-        return true;
-    }
-}
-
-if (!function_exists('wp_parse_args')) {
-    function wp_parse_args($args, $defaults = []) {
-        if (is_object($args)) {
-            $args = get_object_vars($args);
-        }
-        if (is_array($args)) {
-            return array_merge($defaults, $args);
-        }
-        return $defaults;
-    }
-}
-
-if (!function_exists('current_time')) {
-    function current_time($type, $gmt = 0) {
-        return date('Y-m-d H:i:s');
-    }
-}
-
-if (!function_exists('absint')) {
-    function absint($number) {
-        return abs(intval($number));
-    }
-}
-
-if (!function_exists('maybe_serialize')) {
-    function maybe_serialize($data) {
-        if (is_array($data) || is_object($data)) {
-            return serialize($data);
-        }
-        return $data;
-    }
-}
-
-if (!function_exists('maybe_unserialize')) {
-    function maybe_unserialize($data) {
-        if (is_serialized($data)) {
-            return @unserialize($data);
-        }
-        return $data;
-    }
-}
-
-if (!function_exists('is_serialized')) {
-    function is_serialized($data) {
-        // If it isn't a string, it isn't serialized.
-        if (!is_string($data)) {
-            return false;
-        }
-        $data = trim($data);
-        if ('N;' === $data) {
-            return true;
-        }
-        if (strlen($data) < 4 || ':' !== $data[1]) {
-            return false;
-        }
-        if ('s:' === substr($data, 0, 2)) {
-            if ('"' !== substr($data, -2, 1)) {
-                return false;
-            }
-        } elseif ('a:' === substr($data, 0, 2) || 'O:' === substr($data, 0, 2)) {
-            if ('}' !== substr($data, -1)) {
-                return false;
-            }
-        } elseif ('b:' === substr($data, 0, 2) || 'i:' === substr($data, 0, 2) || 'd:' === substr($data, 0, 2)) {
-            if (';' !== substr($data, -1)) {
-                return false;
-            }
-        }
-        return true;
-    }
-}
-
-if (!function_exists('wp_json_encode')) {
-    function wp_json_encode($data, $options = 0, $depth = 512) {
-        return json_encode($data, $options, $depth);
-    }
-}
-
-if (!function_exists('dbDelta')) {
-    function dbDelta($queries, $execute = true) {
-        return true;
-    }
-}
-
-// Mock global $wpdb if it doesn't exist
+// Ensure we're in a WordPress environment with database access
 global $wpdb;
-if (!isset($wpdb)) {
-    $wpdb = new class {
-        public $prefix = 'wp_';
 
-        public function prepare($query, ...$args) {
-            return $query;
-        }
-
-        public function get_var($query) {
-            return null;
-        }
-
-        public function get_results($query, $output = OBJECT) {
-            return [];
-        }
-
-        public function query($query) {
-            return true;
-        }
-
-        public function insert($table, $data, $format = null) {
-            return 1;
-        }
-
-        public function update($table, $data, $where, $format = null, $where_format = null) {
-            return 1;
-        }
-
-        public function delete($table, $where, $where_format = null) {
-            return 1;
-        }
-    };
-}
+// Log that we're using the real WordPress environment
+error_log('Status Sentry Benchmark: Using real WordPress environment');
 
 class Status_Sentry_Benchmark_Runner {
 
@@ -339,33 +199,25 @@ class Status_Sentry_Benchmark_Runner {
             echo "Testing Resource Manager performance...\n";
         }
 
-        // For standalone testing, we'll simulate the resource manager behavior
+        // Create an instance of the Resource Manager
+        $resource_manager = new Status_Sentry_Resource_Manager();
 
         // Measure memory usage and execution time for should_continue method
         $start_memory = memory_get_usage();
         $start_time = microtime(true);
 
-        // Simulate resource manager should_continue method
+        // Test the real Resource Manager should_continue method
         for ($i = 0; $i < 100; $i++) {
-            // Simulate checking if a task should continue based on resource usage
-            $tier = 'standard';
+            // Use different tiers to test performance
+            $tiers = ['critical', 'standard', 'intensive', 'report'];
+            $tier = $tiers[$i % count($tiers)];
+
+            // Set task start time and memory to simulate a running task
             $task_start_time = $start_time - rand(1, 10);
             $task_start_memory = $start_memory - (rand(1, 10) * 1024 * 1024);
-            $elapsed_time = microtime(true) - $task_start_time;
-            $memory_used = memory_get_usage() - $task_start_memory;
 
-            // Define budgets for different tiers
-            $budgets = [
-                'critical' => ['time' => 10, 'memory' => 32 * 1024 * 1024],
-                'standard' => ['time' => 30, 'memory' => 64 * 1024 * 1024],
-                'intensive' => ['time' => 60, 'memory' => 128 * 1024 * 1024],
-                'report' => ['time' => 300, 'memory' => 256 * 1024 * 1024]
-            ];
-
-            // Check if the task should continue
-            $time_budget = $budgets[$tier]['time'];
-            $memory_budget = $budgets[$tier]['memory'];
-            $should_continue = $elapsed_time < $time_budget && $memory_used < $memory_budget;
+            // Call the actual should_continue method
+            $resource_manager->should_continue($tier, $task_start_time, $task_start_memory);
         }
 
         $end_time = microtime(true);
@@ -388,6 +240,9 @@ class Status_Sentry_Benchmark_Runner {
             echo "  Execution time: " . number_format($time_used_sec * 1000, 4) . " ms (target: " . ($target['max_time_sec'] * 1000) . " ms) - " . ($time_passed ? "PASSED" : "FAILED") . "\n";
         }
 
+        // Calculate operations per second (100 operations / total time in seconds)
+        $operations_per_second = 100 / ($end_time - $start_time);
+
         return [
             'operation' => 'Resource Manager should_continue()',
             'memory_mb' => $memory_used_mb,
@@ -397,7 +252,11 @@ class Status_Sentry_Benchmark_Runner {
             'memory_passed' => $memory_passed,
             'time_passed' => $time_passed,
             'passed' => $passed,
-            'config' => $this->config['label']
+            'config' => $this->config['label'],
+            // Add keys expected by admin UI
+            'memory_usage' => $memory_used_mb * 1024 * 1024, // Convert MB to bytes
+            'execution_time' => $time_used_sec,
+            'operations_per_second' => $operations_per_second
         ];
     }
 
@@ -443,34 +302,108 @@ class Status_Sentry_Benchmark_Runner {
             echo "Testing Event Processor performance...\n";
         }
 
-        // For standalone testing, we'll simulate the event processor behavior
-        // rather than using the actual class which requires WordPress
+        // Create an instance of the Event Processor
+        $event_processor = new Status_Sentry_Event_Processor();
 
-        // Measure memory usage and execution time
-        $start_memory = memory_get_usage();
+        // Create an instance of the Event Queue to add test events
+        $event_queue = new Status_Sentry_Event_Queue();
+
+        // Get real WordPress data for testing
+        global $wpdb;
+        $post_count = $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_status = 'publish'");
+        $user_count = $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->users}");
+        $plugin_count = count(get_option('active_plugins', []));
+
+        if ($output) {
+            echo "  - Using real WordPress data: {$post_count} posts, {$user_count} users, {$plugin_count} active plugins\n";
+        }
+
+        // Add some realistic test events to the queue
+        $features = ['posts', 'users', 'plugins', 'themes', 'options', 'comments', 'media'];
+        $hooks = ['save_post', 'wp_login', 'activate_plugin', 'switch_theme', 'update_option', 'wp_insert_comment', 'add_attachment'];
+
+        for ($i = 0; $i < 10; $i++) {
+            $feature = $features[$i % count($features)];
+            $hook = $hooks[$i % count($hooks)];
+
+            // Create realistic test data based on the feature
+            $data = [];
+            switch ($feature) {
+                case 'posts':
+                    $recent_posts = get_posts(['numberposts' => 5, 'post_status' => 'publish']);
+                    if (!empty($recent_posts)) {
+                        $post = $recent_posts[0];
+                        $data = [
+                            'post_id' => $post->ID,
+                            'post_title' => $post->post_title,
+                            'post_status' => $post->post_status,
+                            'post_type' => $post->post_type,
+                            'timestamp' => current_time('mysql')
+                        ];
+                    } else {
+                        $data = [
+                            'post_id' => $i + 1,
+                            'post_title' => 'Test Post ' . ($i + 1),
+                            'post_status' => 'publish',
+                            'post_type' => 'post',
+                            'timestamp' => current_time('mysql')
+                        ];
+                    }
+                    break;
+                case 'users':
+                    $data = [
+                        'user_count' => $user_count,
+                        'current_user' => is_user_logged_in() ? get_current_user_id() : 0,
+                        'timestamp' => current_time('mysql')
+                    ];
+                    break;
+                default:
+                    $data = [
+                        'feature' => $feature,
+                        'hook' => $hook,
+                        'test_id' => $i + 1,
+                        'timestamp' => current_time('mysql')
+                    ];
+            }
+
+            $event_queue->enqueue($data, $feature, $hook);
+        }
+
+        // Trigger garbage collection to ensure a clean state before measuring
+        if (function_exists('gc_collect_cycles')) {
+            gc_collect_cycles();
+        }
+
+        // Start measuring execution time
         $start_time = microtime(true);
 
-        // Simulate processing events
-        for ($i = 0; $i < 10; $i++) {
-            // Simulate event processing with some memory and CPU usage
-            $data = [];
-            for ($j = 0; $j < 1000; $j++) {
-                $data[] = "Event data " . $j;
-            }
-            $data = array_map('md5', $data);
-            $data = array_unique($data);
-            $data = array_values($data);
-            usort($data, function($a, $b) {
-                return strcmp($a, $b);
-            });
+        // Measure memory usage right before processing to isolate processing memory
+        $start_memory = memory_get_usage();
+        $start_peak_memory = memory_get_peak_usage();
+
+        // Process the events using the real Event Processor
+        $processed_count = $event_processor->process_events(10);
+
+        if ($output) {
+            echo "  - Processed {$processed_count} events\n";
         }
 
         $end_time = microtime(true);
         $end_memory = memory_get_usage();
+        $end_peak_memory = memory_get_peak_usage();
 
         // Calculate memory usage and execution time
         $memory_used_mb = ($end_memory - $start_memory) / (1024 * 1024);
+        $peak_memory_used_mb = ($end_peak_memory - $start_peak_memory) / (1024 * 1024);
         $time_used_sec = $end_time - $start_time;
+
+        // Clamp negative memory delta to zero (can happen due to garbage collection during processing)
+        if ($memory_used_mb < 0) {
+            if ($output) {
+                echo "  - Note: Negative memory delta detected, clamping to zero (garbage collection occurred during processing)\n";
+            }
+            $memory_used_mb = 0;
+        }
 
         // Check if the performance meets the targets
         $target = $this->targets['event_processor_process_events'];
@@ -485,6 +418,9 @@ class Status_Sentry_Benchmark_Runner {
             echo "  Execution time: " . number_format($time_used_sec * 1000, 4) . " ms (target: " . ($target['max_time_sec'] * 1000) . " ms) - " . ($time_passed ? "PASSED" : "FAILED") . "\n";
         }
 
+        // Calculate operations per second (number of events processed / total time in seconds)
+        $operations_per_second = $processed_count / $time_used_sec;
+
         return [
             'operation' => 'Event Processor process_events()',
             'memory_mb' => $memory_used_mb,
@@ -494,7 +430,13 @@ class Status_Sentry_Benchmark_Runner {
             'memory_passed' => $memory_passed,
             'time_passed' => $time_passed,
             'passed' => $passed,
-            'config' => $this->config['label']
+            'config' => $this->config['label'],
+            'peak_memory_mb' => $peak_memory_used_mb,
+            // Add keys expected by admin UI
+            'memory_usage' => $memory_used_mb * 1024 * 1024, // Convert MB to bytes
+            'execution_time' => $time_used_sec,
+            'operations_per_second' => $operations_per_second,
+            'peak_memory_usage' => $peak_memory_used_mb * 1024 * 1024 // Convert MB to bytes
         ];
     }
 
@@ -510,19 +452,19 @@ class Status_Sentry_Benchmark_Runner {
             echo "Testing Query Cache performance...\n";
         }
 
-        // For standalone testing, we'll simulate the query cache behavior
+        // Create an instance of the Query Cache
+        $query_cache = new Status_Sentry_Query_Cache();
 
         // Test set method
         $start_memory = memory_get_usage();
         $start_time = microtime(true);
 
-        // Simulate setting cache entries
-        $cache = [];
+        // Set cache entries using the real Query Cache
         for ($i = 0; $i < 100; $i++) {
             $key = 'test_key_' . $i;
             $value = 'test_value_' . $i;
             $group = 'test_group';
-            $cache[$group][$key] = $value;
+            $query_cache->set($key, $value, $group);
         }
 
         $end_time = microtime(true);
@@ -536,11 +478,11 @@ class Status_Sentry_Benchmark_Runner {
         $start_memory = memory_get_usage();
         $start_time = microtime(true);
 
-        // Simulate getting cache entries
+        // Get cache entries using the real Query Cache
         for ($i = 0; $i < 100; $i++) {
             $key = 'test_key_' . $i;
             $group = 'test_group';
-            $value = isset($cache[$group][$key]) ? $cache[$group][$key] : false;
+            $value = $query_cache->get($key, $group);
         }
 
         $end_time = microtime(true);
@@ -572,6 +514,13 @@ class Status_Sentry_Benchmark_Runner {
             echo "  Execution time: " . number_format($time_used_get_sec * 1000, 4) . " ms (target: " . ($get_target['max_time_sec'] * 1000) . " ms) - " . ($get_time_passed ? "PASSED" : "FAILED") . "\n";
         }
 
+        // Calculate average memory usage and execution time
+        $avg_memory_mb = ($memory_used_set_mb + $memory_used_get_mb) / 2;
+        $avg_time_sec = ($time_used_set_sec + $time_used_get_sec) / 2;
+
+        // Calculate operations per second (200 operations / total time in seconds)
+        $operations_per_second = 200 / (($end_time - $start_time) + ($time_used_set_sec * 100));
+
         return [
             'operation' => 'Query Cache operations',
             'set_memory_mb' => $memory_used_set_mb,
@@ -587,7 +536,11 @@ class Status_Sentry_Benchmark_Runner {
             'get_memory_passed' => $get_memory_passed,
             'get_time_passed' => $get_time_passed,
             'passed' => $passed,
-            'config' => $this->config['label']
+            'config' => $this->config['label'],
+            // Add keys expected by admin UI
+            'memory_usage' => $avg_memory_mb * 1024 * 1024, // Convert MB to bytes
+            'execution_time' => $avg_time_sec,
+            'operations_per_second' => $operations_per_second
         ];
     }
 
@@ -603,21 +556,20 @@ class Status_Sentry_Benchmark_Runner {
             echo "Testing Event Queue performance...\n";
         }
 
-        // For standalone testing, we'll simulate the event queue behavior
+        // Create an instance of the Event Queue
+        $event_queue = new Status_Sentry_Event_Queue();
 
         // Measure memory usage and execution time for enqueue method
         $start_memory = memory_get_usage();
         $start_time = microtime(true);
 
-        // Simulate enqueuing events
-        $queue = [];
+        // Enqueue events using the real Event Queue
         for ($i = 0; $i < 10; $i++) {
-            $queue[] = [
-                'feature' => 'test_feature',
-                'hook' => 'test_hook',
-                'data' => ['test_data' => $i],
+            $data = [
+                'test_data' => $i,
                 'timestamp' => microtime(true)
             ];
+            $event_queue->enqueue($data, 'test_feature', 'test_hook');
         }
 
         $end_time = microtime(true);
@@ -640,6 +592,9 @@ class Status_Sentry_Benchmark_Runner {
             echo "  Execution time: " . number_format($time_used_sec * 1000, 4) . " ms (target: " . ($target['max_time_sec'] * 1000) . " ms) - " . ($time_passed ? "PASSED" : "FAILED") . "\n";
         }
 
+        // Calculate operations per second (10 operations / total time in seconds)
+        $operations_per_second = 10 / ($end_time - $start_time);
+
         return [
             'operation' => 'Event Queue enqueue()',
             'memory_mb' => $memory_used_mb,
@@ -649,7 +604,11 @@ class Status_Sentry_Benchmark_Runner {
             'memory_passed' => $memory_passed,
             'time_passed' => $time_passed,
             'passed' => $passed,
-            'config' => $this->config['label']
+            'config' => $this->config['label'],
+            // Add keys expected by admin UI
+            'memory_usage' => $memory_used_mb * 1024 * 1024, // Convert MB to bytes
+            'execution_time' => $time_used_sec,
+            'operations_per_second' => $operations_per_second
         ];
     }
 
@@ -665,31 +624,61 @@ class Status_Sentry_Benchmark_Runner {
             echo "Testing Data Capture performance...\n";
         }
 
-        // For standalone testing, we'll simulate the data capture behavior
+        // Create an instance of the Data Capture
+        $data_capture = new Status_Sentry_Data_Capture();
+
+        // Get real WordPress data for testing
+        global $wpdb;
+        $post_count = $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_status = 'publish'");
+        $user_count = $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->users}");
+        $plugin_count = count(get_option('active_plugins', []));
+
+        if ($output) {
+            echo "  - Using real WordPress data: {$post_count} posts, {$user_count} users, {$plugin_count} active plugins\n";
+        }
 
         // Measure memory usage and execution time for capture method
         $start_memory = memory_get_usage();
         $start_time = microtime(true);
 
-        // Simulate capturing data
-        $captured_data = [];
+        // Capture data using the real Data Capture with real WordPress data
         for ($i = 0; $i < 10; $i++) {
-            $data = ['test_data' => $i];
+            // Use different features and hooks for more realistic testing
+            $features = ['posts', 'users', 'plugins', 'themes', 'options'];
+            $hooks = ['save_post', 'wp_login', 'activate_plugin', 'switch_theme', 'update_option'];
 
-            // Simulate data filtering
-            $filtered_data = array_merge($data, [
-                'timestamp' => microtime(true),
-                'request_id' => md5(uniqid()),
-                'user_id' => rand(1, 1000),
-                'ip' => '127.0.0.1',
-                'url' => 'https://example.com/test',
-                'method' => 'GET'
-            ]);
+            $feature = $features[$i % count($features)];
+            $hook = $hooks[$i % count($hooks)];
 
-            // Simulate sampling
-            if (rand(0, 100) < 80) { // 80% sampling rate
-                $captured_data[] = $filtered_data;
+            // Create realistic test data based on the feature
+            $test_data = [];
+            switch ($feature) {
+                case 'posts':
+                    $recent_posts = get_posts(['numberposts' => 5, 'post_status' => 'publish']);
+                    $test_data = !empty($recent_posts) ? (array)$recent_posts[0] : ['post_title' => 'Test Post'];
+                    break;
+                case 'users':
+                    $test_data = [
+                        'user_count' => $user_count,
+                        'current_user' => is_user_logged_in() ? get_current_user_id() : 0,
+                        'timestamp' => current_time('mysql')
+                    ];
+                    break;
+                case 'plugins':
+                    $test_data = [
+                        'active_plugins' => $plugin_count,
+                        'plugin_name' => 'Status Sentry WP',
+                        'timestamp' => current_time('mysql')
+                    ];
+                    break;
+                default:
+                    $test_data = [
+                        'test_data' => $i,
+                        'timestamp' => current_time('mysql')
+                    ];
             }
+
+            $data_capture->capture($feature, $hook, $test_data);
         }
 
         $end_time = microtime(true);
@@ -712,6 +701,9 @@ class Status_Sentry_Benchmark_Runner {
             echo "  Execution time: " . number_format($time_used_sec * 1000, 4) . " ms (target: " . ($target['max_time_sec'] * 1000) . " ms) - " . ($time_passed ? "PASSED" : "FAILED") . "\n";
         }
 
+        // Calculate operations per second (10 operations / total time in seconds)
+        $operations_per_second = 10 / ($end_time - $start_time);
+
         return [
             'operation' => 'Data Capture capture()',
             'memory_mb' => $memory_used_mb,
@@ -721,7 +713,11 @@ class Status_Sentry_Benchmark_Runner {
             'memory_passed' => $memory_passed,
             'time_passed' => $time_passed,
             'passed' => $passed,
-            'config' => $this->config['label']
+            'config' => $this->config['label'],
+            // Add keys expected by admin UI
+            'memory_usage' => $memory_used_mb * 1024 * 1024, // Convert MB to bytes
+            'execution_time' => $time_used_sec,
+            'operations_per_second' => $operations_per_second
         ];
     }
 }

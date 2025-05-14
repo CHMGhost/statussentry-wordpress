@@ -72,8 +72,8 @@ class Status_Sentry_Baseline implements Status_Sentry_Monitoring_Interface {
 
         if ($baseline) {
             // Update existing baseline with exponential moving average
-            // Weight new value at 10% to avoid rapid fluctuations
-            $weight = 0.1;
+            // Weight new value at 20% to allow for more responsive updates
+            $weight = 0.2; // Increased from 0.1 to make baselines more responsive
             $new_value = ($baseline['value'] * (1 - $weight)) + ($value * $weight);
             $sample_count = $baseline['sample_count'] + 1;
 
@@ -86,13 +86,16 @@ class Status_Sentry_Baseline implements Status_Sentry_Monitoring_Interface {
                 $metadata_json = $baseline['metadata'];
             }
 
+            // Always update the last_updated timestamp, even if the value hasn't changed much
+            $current_time = current_time('mysql');
+
             // Update the baseline
             $result = $wpdb->update(
                 $this->table_name,
                 [
                     'value' => $new_value,
                     'sample_count' => $sample_count,
-                    'last_updated' => current_time('mysql'),
+                    'last_updated' => $current_time,
                     'metadata' => $metadata_json,
                 ],
                 [
@@ -221,7 +224,9 @@ class Status_Sentry_Baseline implements Status_Sentry_Monitoring_Interface {
      * @return   void
      */
     public function register_handlers($manager) {
-        // Baseline doesn't handle events directly
+        // Register handlers for resource usage and performance events
+        $manager->register_handler('resource_usage', [$this, 'process_event']);
+        $manager->register_handler('performance', [$this, 'process_event']);
     }
 
     /**
@@ -229,10 +234,40 @@ class Status_Sentry_Baseline implements Status_Sentry_Monitoring_Interface {
      *
      * @since    1.3.0
      * @param    Status_Sentry_Monitoring_Event    $event    The monitoring event to process.
-     * @return   void
+     * @return   bool                              Whether the event was processed successfully.
      */
     public function process_event($event) {
-        // Baseline doesn't process events directly
+        $type = $event->get_type();
+        $data = $event->get_data();
+        $context = $event->get_context();
+        $source = $event->get_source();
+
+        // Process resource usage events
+        if ($type === 'resource_usage') {
+            // Record memory usage if available
+            if (isset($data['memory_usage'])) {
+                $this->record_metric('memory_usage', $context, $data['memory_usage']);
+            }
+
+            // Record CPU usage if available
+            if (isset($data['cpu_usage'])) {
+                $this->record_metric('cpu_usage', $context, $data['cpu_usage']);
+            }
+
+            return true;
+        }
+
+        // Process performance events
+        if ($type === 'performance') {
+            // Record execution time if available
+            if (isset($data['execution_time'])) {
+                $this->record_metric('execution_time', $context, $data['execution_time']);
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -280,5 +315,143 @@ class Status_Sentry_Baseline implements Status_Sentry_Monitoring_Interface {
     public function update_config($config) {
         // Baseline doesn't have configurable options yet
         return true;
+    }
+
+    /**
+     * Take a snapshot of the current system state.
+     *
+     * @since    1.6.0
+     * @param    string    $snapshot_name    The name of the snapshot.
+     * @return   array                       The snapshot data.
+     */
+    public function snapshot($snapshot_name) {
+        // Collect system metrics
+        $snapshot = [
+            'memory_usage' => memory_get_usage(),
+            'memory_peak' => memory_get_peak_usage(),
+            'timestamp' => microtime(true),
+            'active_plugins' => get_option('active_plugins'),
+            'name' => $snapshot_name,
+        ];
+
+        // Add database metrics
+        global $wpdb;
+        $snapshot['db_queries'] = $wpdb->num_queries;
+
+        // Add additional metrics if available
+        if (function_exists('sys_getloadavg')) {
+            $load = sys_getloadavg();
+            $snapshot['cpu_load'] = $load[0];
+        }
+
+        // Store the snapshot in a transient
+        set_transient('status_sentry_snapshot_' . $snapshot_name, $snapshot, 3600); // 1 hour expiration
+
+        return $snapshot;
+    }
+
+    /**
+     * Take a snapshot before plugin activation.
+     *
+     * @since    1.6.0
+     * @param    string    $plugin    The plugin being activated.
+     * @return   array                The snapshot data.
+     */
+    public function snapshot_before($plugin) {
+        $plugin_name = basename($plugin, '.php');
+        return $this->snapshot('before_' . $plugin_name);
+    }
+
+    /**
+     * Take a snapshot after plugin activation.
+     *
+     * @since    1.6.0
+     * @param    string    $plugin    The plugin that was activated.
+     * @return   array                The snapshot data.
+     */
+    public function snapshot_after($plugin) {
+        $plugin_name = basename($plugin, '.php');
+        return $this->snapshot('after_' . $plugin_name);
+    }
+
+    /**
+     * Compare two snapshots and identify differences.
+     *
+     * @since    1.6.0
+     * @param    string    $before_name    The name of the before snapshot.
+     * @param    string    $after_name     The name of the after snapshot.
+     * @return   array                     The differences between snapshots.
+     */
+    public function diff($before_name, $after_name) {
+        // Get the snapshots
+        $before = get_transient('status_sentry_snapshot_' . $before_name);
+        $after = get_transient('status_sentry_snapshot_' . $after_name);
+
+        // If either snapshot is missing, return empty diff
+        if (!$before || !$after) {
+            return [];
+        }
+
+        $diff = [];
+
+        // Compare memory usage
+        if (isset($before['memory_usage']) && isset($after['memory_usage'])) {
+            $memory_diff = $after['memory_usage'] - $before['memory_usage'];
+            $memory_diff_percent = ($before['memory_usage'] > 0) ? ($memory_diff / $before['memory_usage']) * 100 : 0;
+
+            if (abs($memory_diff_percent) > 20) { // 20% threshold
+                $diff['memory_usage'] = [
+                    'before' => $before['memory_usage'],
+                    'after' => $after['memory_usage'],
+                    'diff' => $memory_diff,
+                    'diff_percent' => $memory_diff_percent,
+                ];
+            }
+        }
+
+        // Compare memory peak
+        if (isset($before['memory_peak']) && isset($after['memory_peak'])) {
+            $memory_peak_diff = $after['memory_peak'] - $before['memory_peak'];
+            $memory_peak_diff_percent = ($before['memory_peak'] > 0) ? ($memory_peak_diff / $before['memory_peak']) * 100 : 0;
+
+            if (abs($memory_peak_diff_percent) > 20) { // 20% threshold
+                $diff['memory_peak'] = [
+                    'before' => $before['memory_peak'],
+                    'after' => $after['memory_peak'],
+                    'diff' => $memory_peak_diff,
+                    'diff_percent' => $memory_peak_diff_percent,
+                ];
+            }
+        }
+
+        // Compare CPU load
+        if (isset($before['cpu_load']) && isset($after['cpu_load'])) {
+            $cpu_diff = $after['cpu_load'] - $before['cpu_load'];
+            $cpu_diff_percent = ($before['cpu_load'] > 0) ? ($cpu_diff / $before['cpu_load']) * 100 : 0;
+
+            if (abs($cpu_diff_percent) > 30) { // 30% threshold
+                $diff['cpu_load'] = [
+                    'before' => $before['cpu_load'],
+                    'after' => $after['cpu_load'],
+                    'diff' => $cpu_diff,
+                    'diff_percent' => $cpu_diff_percent,
+                ];
+            }
+        }
+
+        // Compare DB queries
+        if (isset($before['db_queries']) && isset($after['db_queries'])) {
+            $queries_diff = $after['db_queries'] - $before['db_queries'];
+
+            if ($queries_diff > 50) { // 50 queries threshold
+                $diff['db_queries'] = [
+                    'before' => $before['db_queries'],
+                    'after' => $after['db_queries'],
+                    'diff' => $queries_diff,
+                ];
+            }
+        }
+
+        return $diff;
     }
 }

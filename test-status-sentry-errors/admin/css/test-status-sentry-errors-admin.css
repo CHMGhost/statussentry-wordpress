@@ -1,0 +1,71 @@
+/**
+ * Admin styles for Status Sentry Test Errors
+ */
+
+.sstest-dashboard .card {
+    max-width: 800px;
+    padding: 20px;
+    margin-bottom: 20px;
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+}
+
+.sstest-dashboard .card h2 {
+    margin-top: 0;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 10px;
+}
+
+.sstest-dashboard .button-container {
+    margin: 20px 0;
+}
+
+.sstest-dashboard .button-primary {
+    margin-right: 10px;
+}
+
+.sstest-dashboard .error-type {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 3px;
+    margin-right: 10px;
+    font-weight: bold;
+}
+
+.sstest-dashboard .error-type.error {
+    background: #ffebe8;
+    color: #d63638;
+}
+
+.sstest-dashboard .error-type.critical {
+    background: #fcf0f1;
+    color: #b32d2e;
+}
+
+.sstest-dashboard .error-type.conflict {
+    background: #f0f6fc;
+    color: #2271b1;
+}
+
+.sstest-dashboard .error-type.cron {
+    background: #f6f7f7;
+    color: #3c434a;
+}
+
+.sstest-dashboard .event-details {
+    margin-top: 10px;
+    padding: 10px;
+    background: #f6f7f7;
+    border-left: 4px solid #2271b1;
+}
+
+.sstest-dashboard .event-details pre {
+    margin: 0;
+    overflow: auto;
+}
+
+.sstest-dashboard .next-run {
+    font-weight: bold;
+    color: #2271b1;
+}

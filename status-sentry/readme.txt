@@ -102,6 +102,17 @@ Yes, Status Sentry WP is designed to be extensible. You can register custom hook
 
 == Changelog ==
 
+= 1.6.0 =
+* Deprecated legacy events system in favor of the monitoring events system
+* Added filter 'status_sentry_show_legacy_events_tab' to control legacy events tab visibility
+* Changed default events tab to 'monitoring' instead of 'legacy'
+* Added deprecation notice for legacy events tab
+* Added documentation for legacy events system deprecation
+* Improved UI by hiding legacy events tab by default
+* Added backward compatibility for sites still using legacy events
+* Updated dashboard widget and REST API to use monitoring events instead of legacy events
+* Implemented mapping of monitoring event types to legacy feature categories for backward compatibility
+
 = 1.3.0 =
 * Added centralized monitoring system with standardized interfaces
 * Implemented monitoring manager for event handling and dispatching
@@ -135,6 +146,9 @@ Yes, Status Sentry WP is designed to be extensible. You can register custom hook
 * Performance monitoring
 
 == Upgrade Notice ==
+
+= 1.6.0 =
+This update deprecates the legacy events system in favor of the monitoring events system. The dashboard widget and REST API now use monitoring events instead of legacy events. The legacy events tab is now hidden by default but can be re-enabled via a filter. See the documentation for details.
 
 = 1.3.0 =
 This update adds a comprehensive monitoring system with standardized interfaces, event handling, and multiple monitoring components for improved plugin health and performance tracking.

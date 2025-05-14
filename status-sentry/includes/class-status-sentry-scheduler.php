@@ -140,6 +140,9 @@ class Status_Sentry_Scheduler {
         self::register_task('cleanup_expired_cache', 'status_sentry_cleanup_expired_cache', 'standard', 'hourly');
         self::register_task('cleanup_expired_task_state', 'status_sentry_cleanup_expired_task_state', 'standard', 'daily');
 
+        // Register baseline update task - runs every 15 minutes to keep metrics fresh
+        self::register_task('update_baselines', 'status_sentry_update_baselines', 'standard', 'fifteen_minutes');
+
         // Allow other components to register tasks
         do_action('status_sentry_register_tasks');
     }
@@ -1174,6 +1177,106 @@ class Status_Sentry_Scheduler {
                 self::$self_monitor->baseline->record_metric('cleanup_time', 'intensive', $total_time);
                 self::$self_monitor->baseline->record_metric('cleanup_memory', 'intensive', $memory_used);
                 self::$self_monitor->baseline->record_metric('cleanup_queries', 'intensive', $db_queries);
+            }
+        }
+
+        return $stats;
+    }
+
+    /**
+     * Update system baselines.
+     *
+     * This method collects current system metrics and emits resource_usage events
+     * to ensure baseline metrics are regularly updated.
+     *
+     * @since    1.6.0
+     * @param    int      $batch_size    Optional. The number of metrics to update. Default 5.
+     * @return   array                   Statistics about the baseline update.
+     */
+    public static function update_baselines($batch_size = 5) {
+        $start_time = microtime(true);
+        $memory_start = memory_get_usage();
+        $db_queries_start = get_num_queries();
+
+        $stats = [
+            'metrics_updated' => 0,
+            'errors' => 0,
+        ];
+
+        try {
+            error_log('Status Sentry: Starting baseline metrics update');
+
+            // Get the monitoring manager instance
+            $monitoring_manager = Status_Sentry_Monitoring_Manager::get_instance();
+
+            // Collect current system metrics
+            $metrics = [
+                'memory_usage' => memory_get_usage(),
+                'memory_peak' => memory_get_peak_usage(),
+            ];
+
+            // Add CPU load if available
+            if (function_exists('sys_getloadavg')) {
+                $load = sys_getloadavg();
+                $metrics['cpu_usage'] = $load[0];
+            }
+
+            // Add database metrics
+            global $wpdb;
+            $metrics['db_queries'] = $wpdb->num_queries;
+
+            // Emit a resource_usage event with the collected metrics
+            $event = new Status_Sentry_Monitoring_Event(
+                'resource_usage',
+                'scheduler',
+                'system',
+                'Regular baseline metrics update',
+                $metrics,
+                Status_Sentry_Monitoring_Event::PRIORITY_LOW
+            );
+
+            // Dispatch the event to update baselines
+            $result = $monitoring_manager->dispatch($event);
+
+            if ($result) {
+                $stats['metrics_updated']++;
+                error_log('Status Sentry: Successfully emitted resource_usage event for baseline update');
+            } else {
+                $stats['errors']++;
+                error_log('Status Sentry: Failed to emit resource_usage event for baseline update');
+            }
+
+            // Also emit a performance event for execution metrics
+            $perf_event = new Status_Sentry_Monitoring_Event(
+                'performance',
+                'scheduler',
+                'baseline_update',
+                'Baseline update performance metrics',
+                [
+                    'execution_time' => microtime(true) - $start_time,
+                    'memory_used' => memory_get_usage() - $memory_start,
+                ],
+                Status_Sentry_Monitoring_Event::PRIORITY_LOW
+            );
+
+            $monitoring_manager->dispatch($perf_event);
+
+        } catch (Exception $e) {
+            error_log('Status Sentry: Exception during baseline update - ' . $e->getMessage());
+            $stats['errors']++;
+        } finally {
+            // Always log completion, even if an error occurred
+            $total_time = microtime(true) - $start_time;
+            error_log(sprintf(
+                'Status Sentry: Baseline update completed in %.2f seconds. Stats: %s',
+                $total_time,
+                json_encode($stats)
+            ));
+
+            // Record metrics for baseline
+            if (self::$self_monitor !== null) {
+                self::$self_monitor->baseline->record_metric('baseline_update_time', 'standard', $total_time);
+                self::$self_monitor->baseline->record_metric('baseline_update_memory', 'standard', memory_get_usage() - $memory_start);
             }
         }
 

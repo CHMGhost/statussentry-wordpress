@@ -221,21 +221,46 @@ class Status_Sentry_DB_Migrator {
         // Add hardcoded migrations for 1.2.0
         // This ensures that the new migrations are included even if the files don't exist yet
         if (!isset($migrations[5])) {
-            $migrations[5] = $this->migrations_dir . '005_create_task_state_table.php';
+            $file = $this->migrations_dir . '005_create_task_state_table.php';
+            if (file_exists($file)) {
+                $migrations[5] = $file;
+            } else {
+                error_log('Status Sentry: Migration file not found: ' . $file);
+            }
         }
         if (!isset($migrations[6])) {
-            $migrations[6] = $this->migrations_dir . '006_create_query_cache_table.php';
+            $file = $this->migrations_dir . '006_create_query_cache_table.php';
+            if (file_exists($file)) {
+                $migrations[6] = $file;
+            } else {
+                error_log('Status Sentry: Migration file not found: ' . $file);
+            }
         }
         if (!isset($migrations[7])) {
-            $migrations[7] = $this->migrations_dir . '007_add_composite_indexes.php';
+            $file = $this->migrations_dir . '007_add_composite_indexes.php';
+            if (file_exists($file)) {
+                $migrations[7] = $file;
+            } else {
+                error_log('Status Sentry: Migration file not found: ' . $file);
+            }
         }
 
         // Add hardcoded migrations for 1.4.0
         if (!isset($migrations[8])) {
-            $migrations[8] = $this->migrations_dir . '008_create_monitoring_events_table.php';
+            $file = $this->migrations_dir . '008_create_monitoring_events_table.php';
+            if (file_exists($file)) {
+                $migrations[8] = $file;
+            } else {
+                error_log('Status Sentry: Migration file not found: ' . $file);
+            }
         }
         if (!isset($migrations[9])) {
-            $migrations[9] = $this->migrations_dir . '009_create_cron_logs_table.php';
+            $file = $this->migrations_dir . '009_create_cron_logs_table.php';
+            if (file_exists($file)) {
+                $migrations[9] = $file;
+            } else {
+                error_log('Status Sentry: Migration file not found: ' . $file);
+            }
         }
 
         return $migrations;

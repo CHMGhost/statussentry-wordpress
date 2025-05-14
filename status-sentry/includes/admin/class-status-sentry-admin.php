@@ -45,8 +45,77 @@ class Status_Sentry_Admin {
         // Add dashboard widget
         add_action('wp_dashboard_setup', [$this, 'add_dashboard_widget']);
 
+        // Register AJAX handlers
+        add_action('wp_ajax_status_sentry_get_event', [$this, 'ajax_get_event']);
+        add_action('wp_ajax_status_sentry_clear_events', [$this, 'ajax_clear_events']);
+        add_action('wp_ajax_status_sentry_dismiss_legacy_notice', [$this, 'ajax_dismiss_legacy_notice']);
+
         // Check if setup wizard needs to be run
         add_action('admin_init', [$this, 'maybe_redirect_to_setup_wizard']);
+
+        // Add admin notice about legacy events tab deprecation
+        add_action('admin_notices', [$this, 'legacy_events_deprecation_notice']);
+    }
+
+    /**
+     * Display a notice about the legacy events tab deprecation.
+     *
+     * @since    1.6.0
+     */
+    public function legacy_events_deprecation_notice() {
+        // Only show on Status Sentry pages
+        $screen = get_current_screen();
+        if (!$screen || strpos($screen->id, 'status-sentry') === false) {
+            return;
+        }
+
+        // Only show on the events page with legacy tab parameter
+        if ($screen->id !== 'status-sentry_page_status-sentry-events' || !isset($_GET['tab']) || $_GET['tab'] !== 'legacy') {
+            return;
+        }
+
+        // Check if the user has dismissed this notice
+        $dismissed = get_user_meta(get_current_user_id(), 'status_sentry_legacy_notice_dismissed', true);
+        if ($dismissed) {
+            return;
+        }
+
+        ?>
+        <div class="notice notice-warning is-dismissible status-sentry-legacy-notice">
+            <p>
+                <strong><?php echo esc_html__('Legacy Events System Deprecated', 'status-sentry-wp'); ?></strong>
+            </p>
+            <p>
+                <?php echo esc_html__('The Legacy Events system has been deprecated in favor of the new Monitoring Events system. In future versions, this tab will be hidden by default.', 'status-sentry-wp'); ?>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-events&tab=monitoring')); ?>">
+                    <?php echo esc_html__('Switch to Monitoring Events', 'status-sentry-wp'); ?>
+                </a>
+            </p>
+            <p>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-events&tab=monitoring')); ?>" class="button button-primary">
+                    <?php echo esc_html__('Switch to Monitoring Events', 'status-sentry-wp'); ?>
+                </a>
+                <a href="<?php echo esc_url(plugin_dir_url(STATUS_SENTRY_PLUGIN_BASENAME) . 'docs/LEGACY-EVENTS.md'); ?>" class="button" target="_blank">
+                    <?php echo esc_html__('Learn More', 'status-sentry-wp'); ?>
+                </a>
+            </p>
+        </div>
+        <script>
+            jQuery(document).ready(function($) {
+                // Handle notice dismissal
+                $(document).on('click', '.status-sentry-legacy-notice .notice-dismiss', function() {
+                    $.ajax({
+                        url: ajaxurl,
+                        type: 'POST',
+                        data: {
+                            action: 'status_sentry_dismiss_legacy_notice',
+                            nonce: '<?php echo wp_create_nonce('status-sentry-dismiss-legacy-notice'); ?>'
+                        }
+                    });
+                });
+            });
+        </script>
+        <?php
     }
 
     /**
@@ -135,37 +204,131 @@ class Status_Sentry_Admin {
      * @param    string    $hook_suffix    The current admin page.
      */
     public function enqueue_scripts($hook_suffix) {
+        // Enqueue Chart.js on the WordPress dashboard page
+        if ($hook_suffix === 'index.php') {
+            // Enqueue Chart.js
+            wp_enqueue_script(
+                'chartjs',
+                'https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js',
+                [],
+                '3.9.1',
+                true
+            );
+
+            // Enqueue admin styles for the widget
+            wp_enqueue_style(
+                'status-sentry-admin',
+                STATUS_SENTRY_PLUGIN_URL . 'assets/css/admin.css',
+                [],
+                STATUS_SENTRY_VERSION
+            );
+
+            // Enqueue admin script for the widget
+            wp_enqueue_script(
+                'status-sentry-admin',
+                STATUS_SENTRY_PLUGIN_URL . 'assets/js/admin.js',
+                ['jquery', 'chartjs'],
+                STATUS_SENTRY_VERSION,
+                true
+            );
+
+            // Localize script with REST API info for the widget
+            wp_localize_script(
+                'status-sentry-admin',
+                'statusSentry',
+                [
+                    'ajaxUrl' => admin_url('admin-ajax.php'),
+                    'nonce' => wp_create_nonce('status-sentry-admin'),
+                    'restUrl' => esc_url_raw(rest_url('status-sentry/v1/dashboard/')),
+                    'dashboardDataEndpoint' => esc_url_raw(rest_url('status-sentry/v1/dashboard/data')),
+                    'restNonce' => wp_create_nonce('wp_rest'),
+                    'adminUrl' => admin_url(),
+                    'pluginVersion' => STATUS_SENTRY_VERSION,
+                    'debug' => defined('WP_DEBUG') && WP_DEBUG,
+                ]
+            );
+
+            return;
+        }
+
         // Only enqueue on plugin pages
         if (strpos($hook_suffix, 'status-sentry') === false) {
             return;
         }
 
+        // Enqueue jQuery UI styles
+        wp_enqueue_style(
+            'jquery-ui-style',
+            'https://code.jquery.com/ui/1.13.2/themes/smoothness/jquery-ui.css',
+            [],
+            '1.13.2'
+        );
+
         // Enqueue styles
         wp_enqueue_style(
             'status-sentry-admin',
             STATUS_SENTRY_PLUGIN_URL . 'assets/css/admin.css',
-            [],
+            ['jquery-ui-style'],
             STATUS_SENTRY_VERSION
         );
+
+        // Enqueue jQuery UI scripts
+        wp_enqueue_script('jquery-ui-core');
+        wp_enqueue_script('jquery-ui-dialog');
 
         // Enqueue scripts
         wp_enqueue_script(
             'status-sentry-admin',
             STATUS_SENTRY_PLUGIN_URL . 'assets/js/admin.js',
-            ['jquery'],
+            ['jquery', 'jquery-ui-dialog'],
             STATUS_SENTRY_VERSION,
             true
         );
 
-        // Localize script
+        // Localize script with REST API info
         wp_localize_script(
             'status-sentry-admin',
             'statusSentry',
             [
                 'ajaxUrl' => admin_url('admin-ajax.php'),
                 'nonce' => wp_create_nonce('status-sentry-admin'),
+                'restUrl' => esc_url_raw(rest_url('status-sentry/v1/dashboard/')),
+                'dashboardDataEndpoint' => esc_url_raw(rest_url('status-sentry/v1/dashboard/data')),
+                'restNonce' => wp_create_nonce('wp_rest'),
+                'adminUrl' => admin_url(),
+                'pluginVersion' => STATUS_SENTRY_VERSION,
+                'debug' => defined('WP_DEBUG') && WP_DEBUG,
             ]
         );
+
+        // Enqueue dashboard-specific assets on the main dashboard page
+        if ($hook_suffix === 'toplevel_page_status-sentry') {
+            // Enqueue Chart.js
+            wp_enqueue_script(
+                'chartjs',
+                'https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js',
+                [],
+                '3.9.1',
+                true
+            );
+
+            // Enqueue dashboard script
+            wp_enqueue_script(
+                'status-sentry-dashboard',
+                STATUS_SENTRY_PLUGIN_URL . 'assets/js/dashboard.js',
+                ['jquery', 'chartjs', 'status-sentry-admin'],
+                STATUS_SENTRY_VERSION,
+                true
+            );
+
+            // Enqueue dashboard styles
+            wp_enqueue_style(
+                'status-sentry-dashboard',
+                STATUS_SENTRY_PLUGIN_URL . 'assets/css/dashboard.css',
+                ['status-sentry-admin'],
+                STATUS_SENTRY_VERSION
+            );
+        }
     }
 
     /**
@@ -187,62 +350,20 @@ class Status_Sentry_Admin {
      * @since    1.0.0
      */
     public function render_dashboard_page() {
-        // Get event counts
-        $event_counts = $this->get_event_counts();
-
-        // Get recent events
-        $recent_events = $this->get_recent_events(5);
-
-        // Render the dashboard
         ?>
         <div class="wrap">
             <h1><?php echo esc_html__('Status Sentry Dashboard', 'status-sentry-wp'); ?></h1>
 
-            <div class="status-sentry-dashboard">
-                <div class="status-sentry-dashboard-section">
-                    <h2><?php echo esc_html__('Event Summary', 'status-sentry-wp'); ?></h2>
+            <p>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-benchmark')); ?>" class="button">
+                    <?php echo esc_html__('Run Benchmark', 'status-sentry-wp'); ?>
+                </a>
+            </p>
 
-                    <div class="status-sentry-dashboard-cards">
-                        <?php foreach ($event_counts as $feature => $count) : ?>
-                            <div class="status-sentry-dashboard-card">
-                                <h3><?php echo esc_html(ucfirst(str_replace('_', ' ', $feature))); ?></h3>
-                                <p class="status-sentry-dashboard-card-count"><?php echo esc_html($count); ?></p>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                </div>
-
-                <div class="status-sentry-dashboard-section">
-                    <h2><?php echo esc_html__('Recent Events', 'status-sentry-wp'); ?></h2>
-
-                    <?php if (empty($recent_events)) : ?>
-                        <p><?php echo esc_html__('No events found.', 'status-sentry-wp'); ?></p>
-                    <?php else : ?>
-                        <table class="widefat status-sentry-table">
-                            <thead>
-                                <tr>
-                                    <th><?php echo esc_html__('Feature', 'status-sentry-wp'); ?></th>
-                                    <th><?php echo esc_html__('Hook', 'status-sentry-wp'); ?></th>
-                                    <th><?php echo esc_html__('Time', 'status-sentry-wp'); ?></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($recent_events as $event) : ?>
-                                    <tr>
-                                        <td><?php echo esc_html(ucfirst(str_replace('_', ' ', $event->feature))); ?></td>
-                                        <td><?php echo esc_html($event->hook); ?></td>
-                                        <td><?php echo esc_html(human_time_diff(strtotime($event->event_time), time()) . ' ago'); ?></td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-
-                        <p>
-                            <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-events')); ?>" class="button">
-                                <?php echo esc_html__('View All Events', 'status-sentry-wp'); ?>
-                            </a>
-                        </p>
-                    <?php endif; ?>
+            <div id="status-sentry-dashboard-app">
+                <div class="status-sentry-loading">
+                    <span class="spinner is-active"></span>
+                    <p><?php echo esc_html__('Loading dashboard data...', 'status-sentry-wp'); ?></p>
                 </div>
             </div>
         </div>
@@ -320,6 +441,9 @@ class Status_Sentry_Admin {
             <p>
                 <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-setup&step=1')); ?>" class="button">
                     <?php echo esc_html__('Re-run Setup Wizard', 'status-sentry-wp'); ?>
+                </a>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-benchmark')); ?>" class="button">
+                    <?php echo esc_html__('Run Benchmark', 'status-sentry-wp'); ?>
                 </a>
             </p>
 
@@ -592,46 +716,190 @@ class Status_Sentry_Admin {
      * @since    1.0.0
      */
     public function render_events_page() {
-        // Get events
-        $events = $this->get_events(20);
+        // Check if legacy tab should be shown
+        $show_legacy_tab = apply_filters('status_sentry_show_legacy_events_tab', false);
+
+        // Get tab - default to 'monitoring' instead of 'legacy'
+        $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'monitoring';
+
+        // If legacy tab is hidden and active tab is legacy, switch to monitoring
+        if (!$show_legacy_tab && $active_tab === 'legacy') {
+            $active_tab = 'monitoring';
+        }
 
         // Render the events page
         ?>
         <div class="wrap">
             <h1><?php echo esc_html__('Status Sentry Events', 'status-sentry-wp'); ?></h1>
 
-            <?php if (empty($events)) : ?>
-                <p><?php echo esc_html__('No events found.', 'status-sentry-wp'); ?></p>
+            <p>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-benchmark')); ?>" class="button">
+                    <?php echo esc_html__('Run Benchmark', 'status-sentry-wp'); ?>
+                </a>
+            </p>
+
+            <h2 class="nav-tab-wrapper">
+                <?php if ($show_legacy_tab) : ?>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-events&tab=legacy')); ?>" class="nav-tab <?php echo $active_tab === 'legacy' ? 'nav-tab-active' : ''; ?>">
+                    <?php echo esc_html__('Legacy Events', 'status-sentry-wp'); ?>
+                </a>
+                <?php endif; ?>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=status-sentry-events&tab=monitoring')); ?>" class="nav-tab <?php echo $active_tab === 'monitoring' ? 'nav-tab-active' : ''; ?>">
+                    <?php echo esc_html__('Monitoring Events', 'status-sentry-wp'); ?>
+                </a>
+            </h2>
+
+            <?php if ($active_tab === 'monitoring' || !$show_legacy_tab) : ?>
+                <?php $this->render_monitoring_events_tab(); ?>
             <?php else : ?>
-                <table class="widefat status-sentry-table">
-                    <thead>
-                        <tr>
-                            <th><?php echo esc_html__('ID', 'status-sentry-wp'); ?></th>
-                            <th><?php echo esc_html__('Feature', 'status-sentry-wp'); ?></th>
-                            <th><?php echo esc_html__('Hook', 'status-sentry-wp'); ?></th>
-                            <th><?php echo esc_html__('Time', 'status-sentry-wp'); ?></th>
-                            <th><?php echo esc_html__('Actions', 'status-sentry-wp'); ?></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($events as $event) : ?>
-                            <tr>
-                                <td><?php echo esc_html($event->id); ?></td>
-                                <td><?php echo esc_html(ucfirst(str_replace('_', ' ', $event->feature))); ?></td>
-                                <td><?php echo esc_html($event->hook); ?></td>
-                                <td><?php echo esc_html(human_time_diff(strtotime($event->event_time), time()) . ' ago'); ?></td>
-                                <td>
-                                    <a href="#" class="status-sentry-view-event" data-id="<?php echo esc_attr($event->id); ?>">
-                                        <?php echo esc_html__('View', 'status-sentry-wp'); ?>
-                                    </a>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+                <?php $this->render_legacy_events_tab(); ?>
             <?php endif; ?>
         </div>
         <?php
+    }
+
+    /**
+     * Render legacy events tab.
+     *
+     * @since    1.6.0
+     */
+    private function render_legacy_events_tab() {
+        // Get events
+        $events = $this->get_events(20);
+
+        // Render the legacy events tab
+        ?>
+        <div class="status-sentry-tab-actions">
+            <button type="button" class="button status-sentry-clear-events" data-type="legacy">
+                <?php echo esc_html__('Clear Legacy Events', 'status-sentry-wp'); ?>
+            </button>
+        </div>
+
+        <?php if (empty($events)) : ?>
+            <p><?php echo esc_html__('No legacy events found.', 'status-sentry-wp'); ?></p>
+        <?php else : ?>
+            <table class="widefat status-sentry-table">
+                <thead>
+                    <tr>
+                        <th><?php echo esc_html__('ID', 'status-sentry-wp'); ?></th>
+                        <th><?php echo esc_html__('Feature', 'status-sentry-wp'); ?></th>
+                        <th><?php echo esc_html__('Hook', 'status-sentry-wp'); ?></th>
+                        <th><?php echo esc_html__('Data', 'status-sentry-wp'); ?></th>
+                        <th><?php echo esc_html__('Time', 'status-sentry-wp'); ?></th>
+                        <th><?php echo esc_html__('Actions', 'status-sentry-wp'); ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($events as $event) : ?>
+                        <tr>
+                            <td><?php echo esc_html($event->id); ?></td>
+                            <td><?php echo esc_html(ucfirst(str_replace('_', ' ', $event->feature))); ?></td>
+                            <td><?php echo esc_html($event->hook); ?></td>
+                            <td>
+                                <?php
+                                if (isset($event->data)) {
+                                    $data = json_decode($event->data, true);
+                                    if (is_array($data)) {
+                                        // Show a snippet of the data (first 3 keys)
+                                        $keys = array_keys($data);
+                                        $snippet = array_slice($keys, 0, 3);
+                                        echo esc_html(implode(', ', $snippet));
+                                        if (count($keys) > 3) {
+                                            echo esc_html('...');
+                                        }
+                                    } else {
+                                        echo esc_html(substr($event->data, 0, 50));
+                                        if (strlen($event->data) > 50) {
+                                            echo esc_html('...');
+                                        }
+                                    }
+                                } else {
+                                    echo esc_html__('No data', 'status-sentry-wp');
+                                }
+                                ?>
+                            </td>
+                            <td><?php echo esc_html(human_time_diff(strtotime($event->event_time), time()) . ' ago'); ?></td>
+                            <td>
+                                <a href="#" class="status-sentry-view-event" data-id="<?php echo esc_attr($event->id); ?>" data-type="legacy">
+                                    <?php echo esc_html__('View', 'status-sentry-wp'); ?>
+                                </a>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif;
+    }
+
+    /**
+     * Render monitoring events tab.
+     *
+     * @since    1.6.0
+     */
+    private function render_monitoring_events_tab() {
+        // Get monitoring events
+        $repository = $this->get_monitoring_events_repository();
+        $events = $repository->get_events(20);
+
+        // Render the monitoring events tab
+        ?>
+        <div class="status-sentry-tab-actions">
+            <button type="button" class="button status-sentry-clear-events status-sentry-clear-monitoring-events" data-type="monitoring" data-nonce="<?php echo esc_attr(wp_create_nonce('status-sentry-admin')); ?>">
+                <?php echo esc_html__('Clear Monitoring Events', 'status-sentry-wp'); ?>
+            </button>
+        </div>
+
+        <?php if (empty($events)) : ?>
+            <p><?php echo esc_html__('No monitoring events found.', 'status-sentry-wp'); ?></p>
+        <?php else : ?>
+            <table class="widefat status-sentry-table">
+                <thead>
+                    <tr>
+                        <th><?php echo esc_html__('ID', 'status-sentry-wp'); ?></th>
+                        <th><?php echo esc_html__('Type', 'status-sentry-wp'); ?></th>
+                        <th><?php echo esc_html__('Source', 'status-sentry-wp'); ?></th>
+                        <th><?php echo esc_html__('Context', 'status-sentry-wp'); ?></th>
+                        <th><?php echo esc_html__('Message', 'status-sentry-wp'); ?></th>
+                        <th><?php echo esc_html__('Time', 'status-sentry-wp'); ?></th>
+                        <th><?php echo esc_html__('Actions', 'status-sentry-wp'); ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($events as $event) : ?>
+                        <tr>
+                            <td><?php echo esc_html($event->id); ?></td>
+                            <td>
+                                <span class="status-sentry-event-type-<?php echo esc_attr($event->event_type); ?>">
+                                    <?php echo esc_html(ucfirst($event->event_type)); ?>
+                                </span>
+                            </td>
+                            <td><?php echo esc_html($event->source); ?></td>
+                            <td><?php echo esc_html($event->context); ?></td>
+                            <td><?php echo esc_html(substr($event->message, 0, 50) . (strlen($event->message) > 50 ? '...' : '')); ?></td>
+                            <td><?php echo esc_html(human_time_diff(strtotime($event->timestamp), time()) . ' ago'); ?></td>
+                            <td>
+                                <a href="#" class="status-sentry-view-event" data-id="<?php echo esc_attr($event->id); ?>" data-type="monitoring">
+                                    <?php echo esc_html__('View', 'status-sentry-wp'); ?>
+                                </a>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+
+            <style>
+                .status-sentry-event-type-info { color: #0073aa; }
+                .status-sentry-event-type-warning { color: #ffb900; }
+                .status-sentry-event-type-error { color: #dc3232; }
+                .status-sentry-event-type-critical { color: #dc3232; font-weight: bold; }
+                .status-sentry-event-type-performance { color: #46b450; }
+                .status-sentry-event-type-security { color: #826eb4; }
+                .status-sentry-event-type-conflict { color: #00a0d2; }
+                .status-sentry-event-type-health { color: #00a0d2; }
+                .status-sentry-tab-actions { margin: 15px 0; text-align: right; }
+                .status-sentry-tab-actions .button { margin-left: 10px; }
+            </style>
+        <?php endif;
     }
 
     /**
@@ -646,9 +914,51 @@ class Status_Sentry_Admin {
         // Get recent events
         $recent_events = $this->get_recent_events(3);
 
+        // Get monitoring events repository to get event type counts
+        $repository = $this->get_monitoring_events_repository();
+        $event_type_counts = $repository->get_event_counts();
+
+        // Determine overall status based on event types
+        $overall_status = 'good';
+        if (isset($event_type_counts['critical']) && $event_type_counts['critical'] > 0) {
+            $overall_status = 'error';
+        } elseif ((isset($event_type_counts['error']) && $event_type_counts['error'] > 0) ||
+                 (isset($event_type_counts['warning']) && $event_type_counts['warning'] > 0)) {
+            $overall_status = 'warning';
+        }
+
         // Render the widget
         ?>
         <div class="status-sentry-dashboard-widget">
+            <div class="status-sentry-dashboard-widget-header">
+                <div class="status-sentry-dashboard-widget-status">
+                    <span class="status-sentry-widget-status-indicator status-<?php echo esc_attr($overall_status); ?>"></span>
+                    <span class="status-sentry-widget-status-text">
+                        <?php
+                        if ($overall_status === 'error') {
+                            echo esc_html__('Critical issues detected', 'status-sentry-wp');
+                        } elseif ($overall_status === 'warning') {
+                            echo esc_html__('Warnings detected', 'status-sentry-wp');
+                        } else {
+                            echo esc_html__('System healthy', 'status-sentry-wp');
+                        }
+                        ?>
+                    </span>
+                </div>
+                <div class="status-sentry-widget-status-dots">
+                    <?php foreach (['info', 'warning', 'error', 'critical'] as $type) : ?>
+                        <?php $count = isset($event_type_counts[$type]) ? $event_type_counts[$type] : 0; ?>
+                        <?php if ($count > 0) : ?>
+                            <span class="status-sentry-widget-status-item status-<?php echo $type === 'info' ? 'good' : $type; ?>" title="<?php echo esc_attr(ucfirst($type) . ': ' . $count); ?>"></span>
+                        <?php endif; ?>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+
+            <div class="status-sentry-dashboard-widget-sparkline">
+                <canvas id="status-sentry-widget-sparkline" height="30"></canvas>
+            </div>
+
             <div class="status-sentry-dashboard-widget-counts">
                 <?php foreach ($event_counts as $feature => $count) : ?>
                     <div class="status-sentry-dashboard-widget-count">
@@ -665,9 +975,24 @@ class Status_Sentry_Admin {
                     <ul>
                         <?php foreach ($recent_events as $event) : ?>
                             <li>
-                                <span class="status-sentry-dashboard-widget-event-feature"><?php echo esc_html(ucfirst(str_replace('_', ' ', $event->feature))); ?></span>
-                                <span class="status-sentry-dashboard-widget-event-hook"><?php echo esc_html($event->hook); ?></span>
-                                <span class="status-sentry-dashboard-widget-event-time"><?php echo esc_html(human_time_diff(strtotime($event->event_time), time()) . ' ago'); ?></span>
+                                <?php
+                                // Determine if this is a monitoring event or legacy event
+                                $is_monitoring = isset($event->is_monitoring_event) && $event->is_monitoring_event;
+
+                                // Get feature name
+                                $feature = $event->feature;
+                                $feature_name = ucfirst(str_replace('_', ' ', $feature));
+
+                                // Get hook/source
+                                $hook = $event->hook;
+
+                                // Get time ago
+                                $time_field = $is_monitoring ? $event->event_time : $event->event_time;
+                                $time_ago = human_time_diff(strtotime($time_field), time()) . ' ago';
+                                ?>
+                                <span class="status-sentry-dashboard-widget-event-feature"><?php echo esc_html($feature_name); ?></span>
+                                <span class="status-sentry-dashboard-widget-event-hook"><?php echo esc_html($hook); ?></span>
+                                <span class="status-sentry-dashboard-widget-event-time"><?php echo esc_html($time_ago); ?></span>
                             </li>
                         <?php endforeach; ?>
                     </ul>
@@ -680,8 +1005,89 @@ class Status_Sentry_Admin {
                 </a>
             </p>
         </div>
+
+        <script>
+            // This script will be executed when the widget is loaded
+            jQuery(document).ready(function($) {
+                // Initialize the sparkline chart if Chart.js is loaded
+                if (typeof Chart !== 'undefined' && $('#status-sentry-widget-sparkline').length) {
+                    // Fetch data from the dashboard data endpoint
+                    $.ajax({
+                        url: statusSentry.dashboardDataEndpoint,
+                        method: 'GET',
+                        beforeSend: function(xhr) {
+                            xhr.setRequestHeader('X-WP-Nonce', statusSentry.restNonce);
+                        },
+                        success: function(response) {
+                            if (response && response.timeline && response.timeline.labels) {
+                                // Create a simplified dataset for the sparkline
+                                var sparklineData = {
+                                    labels: response.timeline.labels,
+                                    datasets: [{
+                                        label: 'Events',
+                                        data: [],
+                                        borderColor: '#0073aa',
+                                        backgroundColor: 'rgba(0, 115, 170, 0.2)',
+                                        borderWidth: 1,
+                                        fill: true,
+                                        tension: 0.4
+                                    }]
+                                };
+
+                                // Sum all event types for each day
+                                for (var i = 0; i < response.timeline.labels.length; i++) {
+                                    var daySum = 0;
+                                    response.timeline.datasets.forEach(function(dataset) {
+                                        daySum += dataset.data[i];
+                                    });
+                                    sparklineData.datasets[0].data.push(daySum);
+                                }
+
+                                // Create the sparkline chart
+                                var ctx = document.getElementById('status-sentry-widget-sparkline').getContext('2d');
+                                new Chart(ctx, {
+                                    type: 'line',
+                                    data: sparklineData,
+                                    options: {
+                                        responsive: true,
+                                        maintainAspectRatio: false,
+                                        plugins: {
+                                            legend: {
+                                                display: false
+                                            },
+                                            tooltip: {
+                                                enabled: true
+                                            }
+                                        },
+                                        scales: {
+                                            x: {
+                                                display: false
+                                            },
+                                            y: {
+                                                display: false,
+                                                beginAtZero: true
+                                            }
+                                        },
+                                        elements: {
+                                            point: {
+                                                radius: 0
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                        },
+                        error: function(error) {
+                            console.error('Error fetching dashboard data:', error);
+                        }
+                    });
+                }
+            });
+        </script>
         <?php
     }
+
+
 
     /**
      * Render setup wizard page.
@@ -747,40 +1153,56 @@ class Status_Sentry_Admin {
     }
 
     /**
+     * Get events repository.
+     *
+     * @since    1.5.0
+     * @return   Status_Sentry_Events_Repository    The events repository.
+     */
+    private function get_events_repository() {
+        static $repository = null;
+
+        if ($repository === null) {
+            require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/data/class-status-sentry-events-repository.php';
+            $repository = new Status_Sentry_Events_Repository();
+        }
+
+        return $repository;
+    }
+
+    /**
+     * Get monitoring events repository.
+     *
+     * @since    1.6.0
+     * @return   Status_Sentry_Monitoring_Events_Repository    The monitoring events repository.
+     */
+    private function get_monitoring_events_repository() {
+        static $repository = null;
+
+        if ($repository === null) {
+            require_once STATUS_SENTRY_PLUGIN_DIR . 'includes/data/class-status-sentry-monitoring-events-repository.php';
+            $repository = new Status_Sentry_Monitoring_Events_Repository();
+        }
+
+        return $repository;
+    }
+
+    /**
      * Get event counts.
      *
      * @since    1.0.0
      * @return   array    The event counts.
      */
     private function get_event_counts() {
-        global $wpdb;
+        $repository = $this->get_monitoring_events_repository();
+        $counts = $repository->get_event_counts();
 
-        $table_name = $wpdb->prefix . 'status_sentry_events';
-
-        // Check if the table exists
-        if ($wpdb->get_var("SHOW TABLES LIKE '$table_name'") != $table_name) {
-            return [
-                'core_monitoring' => 0,
-                'db_monitoring' => 0,
-                'conflict_detection' => 0,
-                'performance_monitoring' => 0,
-            ];
-        }
-
-        // Get counts for each feature
-        $counts = [];
-        $features = ['core_monitoring', 'db_monitoring', 'conflict_detection', 'performance_monitoring'];
-
-        foreach ($features as $feature) {
-            $count = $wpdb->get_var($wpdb->prepare(
-                "SELECT COUNT(*) FROM $table_name WHERE feature = %s",
-                $feature
-            ));
-
-            $counts[$feature] = $count;
-        }
-
-        return $counts;
+        // Map monitoring event type counts to legacy feature keys
+        return [
+            'core_monitoring' => ($counts['info'] ?? 0) + ($counts['warning'] ?? 0) + ($counts['error'] ?? 0),
+            'db_monitoring' => ($counts['critical'] ?? 0),
+            'conflict_detection' => ($counts['conflict'] ?? 0),
+            'performance_monitoring' => ($counts['performance'] ?? 0),
+        ];
     }
 
     /**
@@ -791,22 +1213,73 @@ class Status_Sentry_Admin {
      * @return   array               The recent events.
      */
     private function get_recent_events($limit = 5) {
-        global $wpdb;
+        $repository = $this->get_monitoring_events_repository();
+        $events = $repository->get_recent_events($limit);
 
-        $table_name = $wpdb->prefix . 'status_sentry_events';
+        // Log the events for debugging
+        error_log('Status Sentry: Retrieved ' . count($events) . ' monitoring events for dashboard widget');
 
-        // Check if the table exists
-        if ($wpdb->get_var("SHOW TABLES LIKE '$table_name'") != $table_name) {
-            return [];
+        // Transform monitoring events to match legacy event structure for backward compatibility
+        $transformed_events = [];
+        foreach ($events as $event) {
+            $feature = $this->map_event_type_to_feature($event->event_type);
+
+            // Create a properly formatted event object with all required fields
+            $transformed_event = (object) [
+                'id' => $event->id,
+                'feature' => $feature,
+                'hook' => $event->source . '/' . $event->context,
+                'event_time' => $event->timestamp,
+                'data' => $event->data,
+                // Add monitoring-specific fields
+                'event_type' => $event->event_type,
+                'priority' => $event->priority,
+                'source' => $event->source,
+                'context' => $event->context,
+                'message' => $event->message,
+                'is_monitoring_event' => true
+            ];
+
+            $transformed_events[] = $transformed_event;
         }
 
-        // Get recent events
-        $events = $wpdb->get_results($wpdb->prepare(
-            "SELECT id, feature, hook, event_time FROM $table_name ORDER BY event_time DESC LIMIT %d",
-            $limit
-        ));
+        // If no monitoring events were found, try to get legacy events as a fallback
+        if (empty($transformed_events)) {
+            error_log('Status Sentry: No monitoring events found, trying legacy events');
+            $legacy_repository = $this->get_events_repository();
+            $legacy_events = $legacy_repository->get_recent_events($limit);
 
-        return $events;
+            if (!empty($legacy_events)) {
+                error_log('Status Sentry: Found ' . count($legacy_events) . ' legacy events');
+                return $legacy_events;
+            }
+        }
+
+        return $transformed_events;
+    }
+
+    /**
+     * Map event type to legacy feature.
+     *
+     * @since    1.6.0
+     * @param    string    $event_type    The event type.
+     * @return   string                   The legacy feature.
+     */
+    private function map_event_type_to_feature($event_type) {
+        switch ($event_type) {
+            case 'info':
+            case 'warning':
+            case 'error':
+                return 'core_monitoring';
+            case 'critical':
+                return 'db_monitoring';
+            case 'conflict':
+                return 'conflict_detection';
+            case 'performance':
+                return 'performance_monitoring';
+            default:
+                return 'core_monitoring';
+        }
     }
 
     /**
@@ -817,21 +1290,254 @@ class Status_Sentry_Admin {
      * @return   array               The events.
      */
     private function get_events($limit = 20) {
-        global $wpdb;
+        $repository = $this->get_monitoring_events_repository();
+        $events = $repository->get_events($limit);
 
-        $table_name = $wpdb->prefix . 'status_sentry_events';
+        // Transform monitoring events to match legacy event structure for backward compatibility
+        $transformed_events = [];
+        foreach ($events as $event) {
+            $feature = $this->map_event_type_to_feature($event->event_type);
 
-        // Check if the table exists
-        if ($wpdb->get_var("SHOW TABLES LIKE '$table_name'") != $table_name) {
-            return [];
+            $transformed_event = (object) [
+                'id' => $event->id,
+                'feature' => $feature,
+                'hook' => $event->source . '/' . $event->context,
+                'event_time' => $event->timestamp,
+                'data' => $event->data,
+                // Add monitoring-specific fields
+                'event_type' => $event->event_type,
+                'priority' => $event->priority,
+                'source' => $event->source,
+                'context' => $event->context,
+                'message' => $event->message,
+                'is_monitoring_event' => true
+            ];
+
+            $transformed_events[] = $transformed_event;
         }
 
-        // Get events
-        $events = $wpdb->get_results($wpdb->prepare(
-            "SELECT id, feature, hook, event_time FROM $table_name ORDER BY event_time DESC LIMIT %d",
-            $limit
-        ));
+        return $transformed_events;
+    }
 
-        return $events;
+    /**
+     * AJAX handler for getting a single event.
+     *
+     * @since    1.5.0
+     */
+    public function ajax_get_event() {
+        // Verify nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'status-sentry-admin')) {
+            wp_send_json_error('Security check failed.');
+        }
+
+        // Check permissions
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('You do not have permission to view this event.');
+        }
+
+        // Get event ID
+        $event_id = isset($_POST['event_id']) ? intval($_POST['event_id']) : 0;
+        if ($event_id <= 0) {
+            wp_send_json_error('Invalid event ID.');
+        }
+
+        // Check if this is a monitoring event
+        $event_type = isset($_POST['event_type']) ? sanitize_text_field($_POST['event_type']) : 'legacy';
+
+        if ($event_type === 'monitoring') {
+            // Get monitoring event
+            $repository = $this->get_monitoring_events_repository();
+            $event = $repository->get_event($event_id);
+
+            // Check if event exists
+            if (!$event) {
+                wp_send_json_error('Monitoring event not found.');
+            }
+
+            // Format monitoring event data
+            $event_data = [
+                'id' => $event->id,
+                'event_id' => $event->event_id,
+                'type' => $event->event_type,
+                'priority' => $event->priority,
+                'source' => $event->source,
+                'context' => $event->context,
+                'message' => $event->message,
+                'event_time' => human_time_diff(strtotime($event->timestamp), time()) . ' ago',
+                'timestamp' => $event->timestamp,
+                'created_at' => $event->created_at,
+                'is_monitoring_event' => true,
+                'data' => null
+            ];
+
+            // Parse JSON data if available
+            if (isset($event->data) && !empty($event->data)) {
+                $data = json_decode($event->data, true);
+                $event_data['data'] = $data ? $data : $event->data;
+            }
+
+            // Get performance metrics if this is a performance event
+            if ($event->event_type === 'performance' && isset($event_data['data'])) {
+                $event_data['performance_metrics'] = $this->extract_performance_metrics($event_data['data']);
+            }
+        } else {
+            // Get legacy event
+            $repository = $this->get_events_repository();
+            $event = $repository->get_event($event_id);
+
+            // Check if event exists
+            if (!$event) {
+                wp_send_json_error('Event not found.');
+            }
+
+            // Format legacy event data
+            $event_data = [
+                'id' => $event->id,
+                'feature' => ucfirst(str_replace('_', ' ', $event->feature)),
+                'hook' => $event->hook,
+                'event_time' => human_time_diff(strtotime($event->event_time), time()) . ' ago',
+                'is_monitoring_event' => false,
+                'data' => null
+            ];
+
+            // Parse JSON data if available
+            if (isset($event->data) && !empty($event->data)) {
+                $data = json_decode($event->data, true);
+                $event_data['data'] = $data ? $data : $event->data;
+            }
+        }
+
+        // Send response
+        wp_send_json_success($event_data);
+    }
+
+    /**
+     * Extract performance metrics from event data.
+     *
+     * @since    1.6.0
+     * @param    array    $data    The event data.
+     * @return   array             The performance metrics.
+     */
+    private function extract_performance_metrics($data) {
+        $metrics = [];
+
+        // Common performance metrics to extract
+        $metric_keys = [
+            'memory_usage', 'memory_peak', 'memory_limit', 'memory_usage_percent',
+            'cpu_load', 'execution_time', 'query_count', 'query_time',
+            'http_requests', 'http_time', 'cache_hits', 'cache_misses'
+        ];
+
+        foreach ($metric_keys as $key) {
+            if (isset($data[$key])) {
+                $metrics[$key] = $data[$key];
+            }
+        }
+
+        return $metrics;
+    }
+
+    /**
+     * AJAX handler for clearing events.
+     *
+     * @since    1.6.0
+     */
+    public function ajax_clear_events() {
+        // Verify nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'status-sentry-admin')) {
+            wp_send_json_error('Security check failed.');
+        }
+
+        // Check permissions
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('You do not have permission to clear events.');
+        }
+
+        // Get event type
+        $type = isset($_POST['type']) ? sanitize_text_field($_POST['type']) : 'legacy';
+
+        // Clear events based on type
+        if ($type === 'monitoring') {
+            // Clear monitoring events
+            $repository = $this->get_monitoring_events_repository();
+            $count = $repository->clear_all_events();
+
+            // Log the operation
+            error_log('Status Sentry: Cleared ' . $count . ' monitoring events');
+
+            // Delete dashboard transients to refresh all cached data
+            delete_transient('status_sentry_dashboard_recent');
+            delete_transient('status_sentry_dashboard_overview');
+            delete_transient('status_sentry_dashboard_trends');
+
+            wp_send_json_success([
+                'message' => sprintf(__('Successfully cleared %d monitoring events.', 'status-sentry-wp'), $count),
+                'deleted' => $count
+            ]);
+        } else if ($type === 'legacy') {
+            // Clear legacy events
+            $repository = $this->get_events_repository();
+            $count = $repository->clear_all_events();
+
+            // Log the operation
+            error_log('Status Sentry: Cleared ' . $count . ' legacy events');
+
+            // Delete dashboard transients to refresh all cached data
+            delete_transient('status_sentry_dashboard_recent');
+            delete_transient('status_sentry_dashboard_overview');
+            delete_transient('status_sentry_dashboard_trends');
+
+            wp_send_json_success([
+                'message' => sprintf(__('Successfully cleared %d legacy events.', 'status-sentry-wp'), $count),
+                'deleted' => $count
+            ]);
+        } else if ($type === 'all') {
+            // Clear both monitoring and legacy events
+            $monitoring_repository = $this->get_monitoring_events_repository();
+            $monitoring_count = $monitoring_repository->clear_all_events();
+
+            $legacy_repository = $this->get_events_repository();
+            $legacy_count = $legacy_repository->clear_all_events();
+
+            $total_count = $monitoring_count + $legacy_count;
+
+            // Log the operation
+            error_log('Status Sentry: Cleared ' . $monitoring_count . ' monitoring events and ' . $legacy_count . ' legacy events');
+
+            // Delete dashboard transients to refresh all cached data
+            delete_transient('status_sentry_dashboard_recent');
+            delete_transient('status_sentry_dashboard_overview');
+            delete_transient('status_sentry_dashboard_trends');
+
+            wp_send_json_success([
+                'message' => sprintf(__('Successfully cleared %d events (%d monitoring, %d legacy).', 'status-sentry-wp'), $total_count, $monitoring_count, $legacy_count),
+                'deleted' => $total_count
+            ]);
+        } else {
+            // Invalid type
+            wp_send_json_error('Invalid event type specified.');
+        }
+    }
+
+    /**
+     * AJAX handler for dismissing the legacy events notice.
+     *
+     * @since    1.6.0
+     */
+    public function ajax_dismiss_legacy_notice() {
+        // Verify nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'status-sentry-dismiss-legacy-notice')) {
+            wp_send_json_error('Security check failed.');
+        }
+
+        // Check permissions
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('You do not have permission to dismiss this notice.');
+        }
+
+        // Update user meta to mark notice as dismissed
+        update_user_meta(get_current_user_id(), 'status_sentry_legacy_notice_dismissed', true);
+
+        wp_send_json_success();
     }
 }

@@ -27,6 +27,7 @@ Version 1.2.0 introduces significant performance improvements to the Status Sent
 - **Generator-Based Processing**: Events are now processed using generators to reduce memory usage.
 - **Streaming Support**: Large datasets are processed in a streaming fashion to maintain a small memory footprint.
 - **Adaptive Batch Sizes**: Batch sizes are adjusted based on available resources.
+- **Garbage Collection Handling**: The benchmark system now properly handles PHP's garbage collection during event processing, preventing negative memory usage readings.
 
 ### 5. Data Retention
 
@@ -118,3 +119,33 @@ If you experience performance issues with the Status Sentry plugin, try the foll
 - Added CPU load monitoring
 - Added configurable data retention
 - Added performance settings UI
+
+## Benchmarking
+
+Status Sentry includes a benchmarking system to measure the performance of key components. This helps ensure that the plugin remains efficient even as new features are added.
+
+### Running Benchmarks
+
+1. Navigate to Status Sentry > Benchmarks in the WordPress admin.
+2. Click "Run Benchmark" to test all components.
+3. View the results to identify any performance issues.
+
+### Memory Usage Measurements
+
+The benchmark system measures memory usage by taking the difference between memory consumption before and after an operation. In some cases, particularly with the Event Processor, PHP's garbage collector may run during the operation, which can result in a negative memory delta (end memory is less than start memory).
+
+To prevent confusion:
+
+1. The benchmark runner now triggers garbage collection before measuring to establish a clean baseline.
+2. Memory measurements are taken immediately before and after the specific operation being tested.
+3. Negative memory deltas are clamped to zero in the results.
+4. Peak memory usage is now tracked separately to provide additional insight.
+
+### Full Width Mode
+
+The benchmark page includes a "Toggle Full Width" button that allows you to maximize the available screen space for viewing charts and results:
+
+1. Click the "Toggle Full Width" button to hide the WordPress admin menu and expand the content area to full width.
+2. Charts will automatically resize to take advantage of the additional space.
+3. Click "Exit Full Width" to return to the standard WordPress admin layout.
+4. Your preference is remembered between page loads using browser local storage.

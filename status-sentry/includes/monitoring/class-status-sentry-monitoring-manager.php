@@ -392,6 +392,8 @@ class Status_Sentry_Monitoring_Manager {
         if ($result === false) {
             error_log('Status Sentry: Failed to store monitoring event - ' . $wpdb->last_error);
             return false;
+        } else {
+            error_log('Status Sentry: Stored monitoring event ID ' . $wpdb->insert_id . ' of type ' . $event_data['type'] . ' from source ' . $event_data['source']);
         }
 
         return true;

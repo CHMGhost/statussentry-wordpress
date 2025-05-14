@@ -80,15 +80,20 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
     public function init() {
         // Register hooks for plugin activation/deactivation
         if ($this->config['monitor_plugin_activation']) {
-            add_action('activated_plugin', [$this, 'on_plugin_activated'], 10, 1);
-            add_action('deactivated_plugin', [$this, 'on_plugin_deactivated'], 10, 1);
+            // Remove the old hooks that emit INFO events for every activation/deactivation
+            // add_action('activated_plugin', [$this, 'on_plugin_activated'], 10, 1);
+            // add_action('deactivated_plugin', [$this, 'on_plugin_deactivated'], 10, 1);
+
+            // Add new hooks for taking snapshots before and after plugin activation
+            add_action('activate_plugin', [$this, 'pre_plugin_activation'], 10, 1);
+            add_action('activated_plugin', [$this, 'post_plugin_activation'], 20, 1);
         }
-        
+
         // Register hooks for theme switching
         if ($this->config['monitor_theme_switching']) {
             add_action('switch_theme', [$this, 'on_theme_switched'], 10, 3);
         }
-        
+
         // Load saved configuration
         $saved_config = get_option('status_sentry_conflict_detector_config', []);
         if (!empty($saved_config)) {
@@ -143,17 +148,17 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
         if (!$this->config['enabled']) {
             return false;
         }
-        
+
         // Check if this is a performance event and we're monitoring performance
         if ($event->get_type() === Status_Sentry_Monitoring_Event::TYPE_PERFORMANCE && !$this->config['monitor_performance_metrics']) {
             return false;
         }
-        
+
         // Check if this is an error event and we're monitoring errors
         if (($event->get_type() === Status_Sentry_Monitoring_Event::TYPE_ERROR || $event->get_type() === Status_Sentry_Monitoring_Event::TYPE_WARNING) && !$this->config['monitor_error_rates']) {
             return false;
         }
-        
+
         return true;
     }
 
@@ -168,11 +173,11 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
         switch ($event->get_type()) {
             case Status_Sentry_Monitoring_Event::TYPE_PERFORMANCE:
                 return $this->handle_performance_event($event);
-            
+
             case Status_Sentry_Monitoring_Event::TYPE_ERROR:
             case Status_Sentry_Monitoring_Event::TYPE_WARNING:
                 return $this->handle_error_event($event);
-            
+
             default:
                 return false;
         }
@@ -188,28 +193,28 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
      */
     private function handle_performance_event($event) {
         $data = $event->get_data();
-        
+
         // Check if this event has performance metrics
         if (!isset($data['metric_name']) || !isset($data['metric_value'])) {
             return false;
         }
-        
+
         $metric_name = $data['metric_name'];
         $metric_value = $data['metric_value'];
         $metric_context = $data['metric_context'] ?? 'default';
-        
+
         // Check if this metric has a baseline
         $baseline = $this->baseline->get_baseline($metric_name, $metric_context);
         if (!$baseline) {
             // No baseline yet, nothing to compare against
             return false;
         }
-        
+
         // Check if the value deviates significantly from the baseline
         if ($this->baseline->is_significant_deviation($metric_name, $metric_context, $metric_value, $this->config['detection_threshold'])) {
             // This is a significant deviation, check for conflict patterns
             $conflicts = $this->check_conflict_patterns($metric_name, $metric_value, $baseline['value']);
-            
+
             if (!empty($conflicts)) {
                 // We found potential conflicts, emit a conflict event
                 $this->emit_conflict_event(
@@ -224,11 +229,11 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
                         'potential_conflicts' => $conflicts,
                     ]
                 );
-                
+
                 return true;
             }
         }
-        
+
         return false;
     }
 
@@ -242,10 +247,10 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
      */
     private function handle_error_event($event) {
         $data = $event->get_data();
-        
+
         // Check if this error matches any known conflict patterns
         $conflicts = $this->check_error_conflict_patterns($event->get_message(), $data);
-        
+
         if (!empty($conflicts)) {
             // We found potential conflicts, emit a conflict event
             $this->emit_conflict_event(
@@ -257,10 +262,10 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
                     'potential_conflicts' => $conflicts,
                 ]
             );
-            
+
             return true;
         }
-        
+
         return false;
     }
 
@@ -312,33 +317,33 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
         if (isset($config['enabled'])) {
             $this->config['enabled'] = (bool)$config['enabled'];
         }
-        
+
         if (isset($config['detection_threshold'])) {
             $threshold = floatval($config['detection_threshold']);
             if ($threshold >= 0.1 && $threshold <= 1.0) {
                 $this->config['detection_threshold'] = $threshold;
             }
         }
-        
+
         if (isset($config['monitor_plugin_activation'])) {
             $this->config['monitor_plugin_activation'] = (bool)$config['monitor_plugin_activation'];
         }
-        
+
         if (isset($config['monitor_theme_switching'])) {
             $this->config['monitor_theme_switching'] = (bool)$config['monitor_theme_switching'];
         }
-        
+
         if (isset($config['monitor_performance_metrics'])) {
             $this->config['monitor_performance_metrics'] = (bool)$config['monitor_performance_metrics'];
         }
-        
+
         if (isset($config['monitor_error_rates'])) {
             $this->config['monitor_error_rates'] = (bool)$config['monitor_error_rates'];
         }
-        
+
         // Save configuration
         update_option('status_sentry_conflict_detector_config', $this->config);
-        
+
         return true;
     }
 
@@ -387,7 +392,7 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
                 ],
             ],
         ];
-        
+
         // Allow plugins to add their own patterns
         $this->conflict_patterns = apply_filters('status_sentry_conflict_patterns', $this->conflict_patterns);
     }
@@ -404,10 +409,10 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
      */
     private function check_conflict_patterns($metric_name, $current_value, $baseline_value) {
         $conflicts = [];
-        
+
         // Calculate the percent change
         $percent_change = (($current_value - $baseline_value) / $baseline_value) * 100;
-        
+
         // Check performance patterns
         foreach ($this->conflict_patterns['performance'] as $pattern) {
             if ($pattern['metric'] === $metric_name) {
@@ -418,7 +423,7 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
                 }
             }
         }
-        
+
         return $conflicts;
     }
 
@@ -433,14 +438,14 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
      */
     private function check_error_conflict_patterns($error_message, $error_data) {
         $conflicts = [];
-        
+
         // Check error patterns
         foreach ($this->conflict_patterns['errors'] as $pattern) {
             if (preg_match($pattern['pattern'], $error_message)) {
                 $conflicts = array_merge($conflicts, $pattern['conflicts']);
             }
         }
-        
+
         return $conflicts;
     }
 
@@ -456,7 +461,7 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
      */
     private function emit_conflict_event($context, $message, $data) {
         $manager = Status_Sentry_Monitoring_Manager::get_instance();
-        
+
         $manager->emit(
             Status_Sentry_Monitoring_Event::TYPE_CONFLICT,
             'conflict_detector',
@@ -468,27 +473,46 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
     }
 
     /**
-     * Handle plugin activation.
+     * Take a snapshot before plugin activation.
      *
-     * @since    1.3.0
-     * @param    string    $plugin    The activated plugin.
+     * @since    1.6.0
+     * @param    string    $plugin    The plugin being activated.
      * @return   void
      */
-    public function on_plugin_activated($plugin) {
-        // Record the plugin activation
-        $manager = Status_Sentry_Monitoring_Manager::get_instance();
-        
-        $manager->emit(
-            Status_Sentry_Monitoring_Event::TYPE_INFO,
-            'conflict_detector',
-            'plugin_activated',
-            sprintf('Plugin activated: %s', $plugin),
-            [
-                'plugin' => $plugin,
-                'active_plugins' => get_option('active_plugins'),
-            ],
-            Status_Sentry_Monitoring_Event::PRIORITY_NORMAL
-        );
+    public function pre_plugin_activation($plugin) {
+        // Take a snapshot of the system state before plugin activation
+        $this->baseline->snapshot_before($plugin);
+    }
+
+    /**
+     * Check for conflicts after plugin activation.
+     *
+     * @since    1.6.0
+     * @param    string    $plugin    The plugin that was activated.
+     * @return   void
+     */
+    public function post_plugin_activation($plugin) {
+        // Take a snapshot of the system state after plugin activation
+        $this->baseline->snapshot_after($plugin);
+
+        // Get the plugin name for snapshot comparison
+        $plugin_name = basename($plugin, '.php');
+
+        // Compare the before and after snapshots to detect conflicts
+        $conflicts = $this->baseline->diff('before_' . $plugin_name, 'after_' . $plugin_name);
+
+        // If conflicts were detected, emit a conflict event
+        if (!empty($conflicts)) {
+            $this->emit_conflict_event(
+                'plugin_conflict',
+                sprintf('Conflict detected on activation of %s', $plugin),
+                [
+                    'plugin' => $plugin,
+                    'active_plugins' => get_option('active_plugins'),
+                    'conflicts' => $conflicts,
+                ]
+            );
+        }
     }
 
     /**
@@ -499,20 +523,8 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
      * @return   void
      */
     public function on_plugin_deactivated($plugin) {
-        // Record the plugin deactivation
-        $manager = Status_Sentry_Monitoring_Manager::get_instance();
-        
-        $manager->emit(
-            Status_Sentry_Monitoring_Event::TYPE_INFO,
-            'conflict_detector',
-            'plugin_deactivated',
-            sprintf('Plugin deactivated: %s', $plugin),
-            [
-                'plugin' => $plugin,
-                'active_plugins' => get_option('active_plugins'),
-            ],
-            Status_Sentry_Monitoring_Event::PRIORITY_NORMAL
-        );
+        // This method is kept for backward compatibility but is no longer used
+        // Plugin deactivation events are now only emitted if actual conflicts are detected
     }
 
     /**
@@ -527,7 +539,7 @@ class Status_Sentry_Conflict_Detector implements Status_Sentry_Monitoring_Interf
     public function on_theme_switched($new_name, $new_theme, $old_theme) {
         // Record the theme switch
         $manager = Status_Sentry_Monitoring_Manager::get_instance();
-        
+
         $manager->emit(
             Status_Sentry_Monitoring_Event::TYPE_INFO,
             'conflict_detector',
