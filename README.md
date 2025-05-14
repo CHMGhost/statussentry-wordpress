@@ -2,7 +2,6 @@
 
 A comprehensive WordPress plugin for monitoring site health, capturing performance data, and detecting plugin conflicts with advanced hook management and minimal performance impact.
 
-![Status Sentry Dashboard](status-sentry/assets/images/dashboard-preview.png)
 
 ## Description
 
